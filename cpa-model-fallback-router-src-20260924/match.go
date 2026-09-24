@@ -1,0 +1,144 @@
+package main
+
+import (
+	"strings"
+)
+
+const requestedModelToken = "$requested"
+
+func matchingRule(cfg pluginConfig, sourceFormat, requestedModel string) (fallbackRule, bool) {
+	if !cfg.Enabled {
+		return fallbackRule{}, false
+	}
+	source := normalizeProtocol(sourceFormat)
+	requested := strings.TrimSpace(requestedModel)
+	if requested == "" {
+		return fallbackRule{}, false
+	}
+	for _, rule := range cfg.Rules {
+		if len(rule.SourceFormats) > 0 && !stringInList(source, rule.SourceFormats) {
+			continue
+		}
+		if !matchesAnyPattern(requested, rule.Models) {
+			continue
+		}
+		return rule, true
+	}
+	return fallbackRule{}, false
+}
+
+type attemptPlan struct {
+	Attempts       []string
+	Primary        string
+	PrimarySkipped bool
+}
+
+func buildAttempts(rule fallbackRule, requestedModel string) []string {
+	return buildAttemptPlan(rule, requestedModel, false).Attempts
+}
+
+func buildAttemptPlan(rule fallbackRule, requestedModel string, skipPrimary bool) attemptPlan {
+	requested := strings.TrimSpace(requestedModel)
+	primary := resolveModelToken(rule.PrimaryModel, requested)
+	fallbacks := make([]string, 0, len(rule.FallbackModels))
+	hasDistinctFallback := false
+	for _, model := range rule.FallbackModels {
+		resolved := resolveModelToken(model, requested)
+		if resolved == "" {
+			continue
+		}
+		fallbacks = append(fallbacks, resolved)
+		if primary == "" || !strings.EqualFold(resolved, primary) {
+			hasDistinctFallback = true
+		}
+	}
+
+	effectiveSkipPrimary := skipPrimary && primary != "" && hasDistinctFallback
+	out := make([]string, 0, 1+len(fallbacks))
+	if primary != "" && !effectiveSkipPrimary {
+		out = append(out, primary)
+	}
+	for _, resolved := range fallbacks {
+		if effectiveSkipPrimary && strings.EqualFold(resolved, primary) {
+			continue
+		}
+		// Explicit repeats are honored so operators can express same-model
+		// retries; only the primary-duplicate introduced by cooldown skipping
+		// is removed above.
+		out = append(out, resolved)
+	}
+	return attemptPlan{Attempts: out, Primary: primary, PrimarySkipped: effectiveSkipPrimary}
+}
+
+func resolveModelToken(model, requested string) string {
+	model = strings.TrimSpace(model)
+	if strings.EqualFold(model, requestedModelToken) {
+		return strings.TrimSpace(requested)
+	}
+	return model
+}
+
+func normalizeProtocol(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "anthropic":
+		return "claude"
+	case "responses", "openai-responses", "openai_responses":
+		return "openai-response"
+	case "chat-completions", "chat_completions", "openai-chat-completions", "openai_chat_completions":
+		return "openai"
+	default:
+		return strings.ToLower(strings.TrimSpace(raw))
+	}
+}
+
+func matchesAnyPattern(value string, patterns []string) bool {
+	for _, pattern := range patterns {
+		if wildcardMatch(value, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func wildcardMatch(value, pattern string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	pattern = strings.ToLower(strings.TrimSpace(pattern))
+	if pattern == "" {
+		return false
+	}
+	if pattern == "*" {
+		return true
+	}
+	parts := strings.Split(pattern, "*")
+	if len(parts) == 1 {
+		return value == pattern
+	}
+	pos := 0
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		idx := strings.Index(value[pos:], part)
+		if idx < 0 {
+			return false
+		}
+		if i == 0 && !strings.HasPrefix(pattern, "*") && idx != 0 {
+			return false
+		}
+		pos += idx + len(part)
+	}
+	last := parts[len(parts)-1]
+	if last != "" && !strings.HasSuffix(pattern, "*") && !strings.HasSuffix(value, last) {
+		return false
+	}
+	return true
+}
+
+func stringInList(value string, list []string) bool {
+	for _, item := range list {
+		if strings.EqualFold(strings.TrimSpace(value), strings.TrimSpace(item)) {
+			return true
+		}
+	}
+	return false
+}
