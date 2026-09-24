@@ -15,9 +15,20 @@ func routeModel(raw []byte) ([]byte, error) {
 		return nil, errUnmarshal
 	}
 	cfg := loadedConfig()
-	if _, ok := matchingRule(cfg, req.SourceFormat, req.RequestedModel); !ok {
+	rule, ok := matchingRule(cfg, req.SourceFormat, req.RequestedModel)
+	if !ok {
+		logHostFn(req.HostCallbackID, "debug", "model-fallback-router: declined request", map[string]any{
+			"requested_model": strings.TrimSpace(req.RequestedModel),
+			"source_format":   normalizeProtocol(req.SourceFormat),
+			"reason":          "no matching fallback rule",
+		})
 		return okEnvelope(pluginapi.ModelRouteResponse{Handled: false})
 	}
+	logHostFn(req.HostCallbackID, "debug", "model-fallback-router: claimed request", map[string]any{
+		"requested_model": strings.TrimSpace(req.RequestedModel),
+		"source_format":   normalizeProtocol(req.SourceFormat),
+		"rule":            rule.Name,
+	})
 	return okEnvelope(pluginapi.ModelRouteResponse{
 		Handled:    true,
 		TargetKind: pluginapi.ModelRouteTargetExecutor,
@@ -45,6 +56,11 @@ func runExecutionFallback(exec pluginapi.ExecutorRequest, hostCallbackID string)
 	reqModel := strings.TrimSpace(exec.Model)
 	rule, ok := matchingRule(cfg, executionSourceFormat(exec), reqModel)
 	if !ok {
+		logHostFn(hostCallbackID, "debug", "model-fallback-router: declined executor request", map[string]any{
+			"requested_model": reqModel,
+			"source_format":   normalizeProtocol(executionSourceFormat(exec)),
+			"reason":          "no matching fallback rule",
+		})
 		return nil, nil, nil, statusError{status: http.StatusBadGateway, message: "no fallback rule matched executor request"}
 	}
 	policy := fallbackPolicy(cfg, rule)
@@ -56,6 +72,13 @@ func runExecutionFallback(exec pluginapi.ExecutorRequest, hostCallbackID string)
 	if len(attempts) == 0 {
 		return nil, nil, nil, statusError{status: http.StatusBadGateway, message: "fallback rule produced no model attempts"}
 	}
+	logHostFn(hostCallbackID, "debug", "model-fallback-router: starting fallback chain", map[string]any{
+		"requested_model":       reqModel,
+		"source_format":         normalizeProtocol(executionSourceFormat(exec)),
+		"rule":                  rule.Name,
+		"attempts":              append([]string(nil), attempts...),
+		"primary_cooldown_skip": plan.PrimarySkipped,
+	})
 
 	var lastErr error
 	bodyInfo := requestBodyInfo(exec)
@@ -70,6 +93,13 @@ func runExecutionFallback(exec pluginapi.ExecutorRequest, hostCallbackID string)
 		if errExecute == nil && successStatus(status) {
 			metadata := attemptMetadata(rule, attempts, model, index, plan.PrimarySkipped)
 			mergeMetadata(metadata, transformMetadata)
+			logHostFn(hostCallbackID, "info", "model-fallback-router: attempt succeeded", map[string]any{
+				"rule":                  rule.Name,
+				"selected_model":        model,
+				"selected_attempt":      index,
+				"fallback_used":         plan.PrimarySkipped || index > 0,
+				"primary_cooldown_skip": plan.PrimarySkipped,
+			})
 			payload := resp.Body
 			if unwrapAuditedExit {
 				unwrapped, exitMetadata, okUnwrap := unwrapAuditedExitResponse(resolveExecutionTransform(cfg, rule), bodyInfo.ResponseProtocol, resp.Body)
@@ -87,6 +117,19 @@ func runExecutionFallback(exec pluginapi.ExecutorRequest, hostCallbackID string)
 		fallbackAllowed := shouldFallback(status, errExecute, policy)
 		if fallbackAllowed && strings.EqualFold(model, plan.Primary) {
 			primaryCooldowns.mark(cooldownKey, fallbackCooldownDuration(policy))
+		}
+		fields := map[string]any{
+			"rule":              rule.Name,
+			"selected_model":    model,
+			"selected_attempt":  index,
+			"status":            status,
+			"fallback_eligible": fallbackAllowed,
+		}
+		if fallbackAllowed && index < len(attempts)-1 {
+			fields["next_model"] = attempts[index+1]
+			logHostFn(hostCallbackID, "info", "model-fallback-router: attempt failed, falling back", fields)
+		} else {
+			logHostFn(hostCallbackID, "warn", "model-fallback-router: attempt failed, returning upstream error", fields)
 		}
 		if index == len(attempts)-1 || !fallbackAllowed {
 			return nil, nil, nil, errExecute

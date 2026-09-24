@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Detect model-overload failures that arrive inside a stream after HTTP 200, including `response.failed`/`error` SSE records, structured JSON error bodies, and capacity/overload message text, and retry before any client-visible content is emitted.
+- Preserve explicit repeats in `fallback_models` so a rule can request same-model retries; previously an identical resolved model name was collapsed and the rule produced a single attempt.
+- Honor auth-unavailable, cooldown, overload, quota, rate-limit, and transport error text when CPA preserves a numeric status the operator did not enumerate, so a fallback-eligible failure shape still advances the chain instead of returning a terminal error.
+
+### Changed
+
+- Buffer the upstream stream prelude before forwarding downstream, so transient overload reported after the stream opens still leaves a retry window.
+- Emit router and fallback decisions through the CPA host log so operators can see whether a request was claimed by the plugin or fell through to CPA's built-in path.
+
 ## [0.2.0] - 2026-08-03
 
 ### Added

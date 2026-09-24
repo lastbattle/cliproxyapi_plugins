@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -218,5 +219,65 @@ func testExecutorRequest() pluginapi.ExecutorRequest {
 		Model:           "claude-sonnet-4-5",
 		SourceFormat:    "claude",
 		OriginalRequest: []byte(`{"model":"claude-sonnet-4-5","messages":[]}`),
+	}
+}
+
+// The router must leave a trail in the host log so an operator can tell whether a
+// request was claimed by the plugin or fell through to CPA's built-in path.
+func TestRouteModelLogsDeclineAndClaim(t *testing.T) {
+	originalLog := logHostFn
+	originalConfig := currentConfig.Load()
+	t.Cleanup(func() {
+		logHostFn = originalLog
+		currentConfig.Store(originalConfig)
+	})
+
+	cfg, err := decodeConfig([]byte(`enabled: true
+rules:
+  - name: gpt_responses
+    source_formats:
+      - openai-response
+    models:
+      - "gpt-*"
+    fallback_models:
+      - "$requested"
+`))
+	if err != nil {
+		t.Fatalf("decodeConfig() error = %v", err)
+	}
+	currentConfig.Store(cfg)
+
+	messages := make([]string, 0, 2)
+	logHostFn = func(_, _ string, message string, _ map[string]any) {
+		messages = append(messages, message)
+	}
+
+	declineRaw, errMarshalDecline := json.Marshal(rpcModelRouteRequest{ModelRouteRequest: pluginapi.ModelRouteRequest{
+		SourceFormat:   "openai-response",
+		RequestedModel: "claude-sonnet-4-5",
+	}})
+	if errMarshalDecline != nil {
+		t.Fatalf("marshal decline request: %v", errMarshalDecline)
+	}
+	if _, errDecline := routeModel(declineRaw); errDecline != nil {
+		t.Fatalf("routeModel(decline) error = %v", errDecline)
+	}
+
+	claimRaw, errMarshalClaim := json.Marshal(rpcModelRouteRequest{ModelRouteRequest: pluginapi.ModelRouteRequest{
+		SourceFormat:   "openai-response",
+		RequestedModel: "gpt-5.6-sol",
+	}})
+	if errMarshalClaim != nil {
+		t.Fatalf("marshal claim request: %v", errMarshalClaim)
+	}
+	if _, errClaim := routeModel(claimRaw); errClaim != nil {
+		t.Fatalf("routeModel(claim) error = %v", errClaim)
+	}
+
+	if !slices.Contains(messages, "model-fallback-router: declined request") {
+		t.Fatalf("messages = %#v, want decline log", messages)
+	}
+	if !slices.Contains(messages, "model-fallback-router: claimed request") {
+		t.Fatalf("messages = %#v, want claim log", messages)
 	}
 }

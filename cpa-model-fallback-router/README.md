@@ -112,7 +112,7 @@ plugins:
 - During cooldown, the plugin skips the primary model and sends the request directly to configured fallback models.
 - Non-streaming requests can fall back after a failed response.
 - Streaming requests fall back only if the failure happens before the first client-visible content event is emitted. Transport prelude events such as `response.created` are held back until real content arrives, so an overload reported after the stream opens can still be retried.
-- If CPA loses the numeric HTTP status but the error text clearly indicates rate limiting, quota exhaustion, auth unavailability, model cooldown, model/provider unavailability, or an operator-disabled account, the plugin treats the failure as fallback eligible.
+- If CPA loses the numeric HTTP status, or preserves one that the configured status lists do not name, but the error text clearly indicates rate limiting, quota exhaustion, auth unavailability, model cooldown, model/provider unavailability, or an operator-disabled account, the plugin treats the failure as fallback eligible. Explicit `no_fallback_on_status` entries still win over matching text.
 - `execution_transform` is disabled by default. Configure it globally, then enable it narrowly per rule for the harness routes that should enforce action-or-audited-exit behavior.
 - `activation` controls when a matched rule becomes an execution turn. Use `tool_surface` for normal harness traffic: after source/model rule matching, transform only requests that expose tools, without matching prompt phrases. Use `always` only for tightly scoped rules where every matched request is intentionally an execution turn.
 - The transform injects a configurable execution envelope, can add `ExitContinuationTool`, and can set required tool choice for supported Claude/OpenAI JSON shapes.
@@ -212,6 +212,7 @@ The plugin does not call upstream providers directly. It delegates all model exe
 - Disabled primary accounts still get called repeatedly: confirm `cooldown_seconds` is greater than `0`; after the first fallback-eligible auth failure, later requests skip the primary model until the cooldown expires.
 - Streaming requests stop after an upstream error: fallback is only possible before the first stream chunk is sent to the client.
 - Provider-specific OAuth scoping is missing: CPA does not currently expose selected auth/provider metadata to plugin executors, so this plugin cannot distinguish Anthropic OAuth from other Anthropic credentials yet.
+- A request still fails with a CPA error such as `auth_unavailable: no auth available (providers=..., model=...; last upstream error: ...)`: that text is produced by CPA's built-in execution path, which means the plugin router did not claim the request. Confirm `plugins.configs.model-fallback-router.enabled` is true and that a rule's `models` pattern matches the client-requested model with a matching `source_formats` entry. The plugin logs routing and fallback decisions through the CPA host log, so enable debug logging and search for `model-fallback-router: claimed request` or `model-fallback-router: declined request`.
 
 ## Releases
 

@@ -56,6 +56,11 @@ func runExecutionFallbackStream(_ context.Context, exec pluginapi.ExecutorReques
 	reqModel := strings.TrimSpace(exec.Model)
 	rule, ok := matchingRule(cfg, executionSourceFormat(exec), reqModel)
 	if !ok {
+		logHostFn(hostCallbackID, "debug", "model-fallback-router: declined executor stream request", map[string]any{
+			"requested_model": reqModel,
+			"source_format":   normalizeProtocol(executionSourceFormat(exec)),
+			"reason":          "no matching fallback rule",
+		})
 		return statusError{status: http.StatusBadGateway, message: "no fallback rule matched executor stream request"}
 	}
 	policy := fallbackPolicy(cfg, rule)
@@ -67,6 +72,13 @@ func runExecutionFallbackStream(_ context.Context, exec pluginapi.ExecutorReques
 	if len(attempts) == 0 {
 		return statusError{status: http.StatusBadGateway, message: "fallback rule produced no stream model attempts"}
 	}
+	logHostFn(hostCallbackID, "debug", "model-fallback-router: starting fallback stream chain", map[string]any{
+		"requested_model":       reqModel,
+		"source_format":         normalizeProtocol(executionSourceFormat(exec)),
+		"rule":                  rule.Name,
+		"attempts":              append([]string(nil), attempts...),
+		"primary_cooldown_skip": plan.PrimarySkipped,
+	})
 
 	var lastErr error
 	bodyInfo := requestBodyInfo(exec)
@@ -78,6 +90,13 @@ func runExecutionFallbackStream(_ context.Context, exec pluginapi.ExecutorReques
 		}
 		status, emitted, errForward := forwardHostModelStream(exec, hostCallbackID, model, bodyInfo.EntryProtocol, bodyInfo.ResponseProtocol, body, pluginStreamID)
 		if errForward == nil && successStatus(responseStatus(status, nil)) {
+			logHostFn(hostCallbackID, "info", "model-fallback-router: stream attempt succeeded", map[string]any{
+				"rule":                  rule.Name,
+				"selected_model":        model,
+				"selected_attempt":      index,
+				"fallback_used":         plan.PrimarySkipped || index > 0,
+				"primary_cooldown_skip": plan.PrimarySkipped,
+			})
 			return nil
 		}
 		if errForward == nil {
@@ -87,6 +106,20 @@ func runExecutionFallbackStream(_ context.Context, exec pluginapi.ExecutorReques
 		fallbackAllowed := shouldFallback(responseStatus(status, errForward), errForward, policy)
 		if fallbackAllowed && strings.EqualFold(model, plan.Primary) {
 			primaryCooldowns.mark(cooldownKey, fallbackCooldownDuration(policy))
+		}
+		fields := map[string]any{
+			"rule":              rule.Name,
+			"selected_model":    model,
+			"selected_attempt":  index,
+			"status":            responseStatus(status, errForward),
+			"fallback_eligible": fallbackAllowed,
+			"client_emitted":    emitted,
+		}
+		if fallbackAllowed && !emitted && index < len(attempts)-1 {
+			fields["next_model"] = attempts[index+1]
+			logHostFn(hostCallbackID, "info", "model-fallback-router: stream attempt failed, falling back", fields)
+		} else {
+			logHostFn(hostCallbackID, "warn", "model-fallback-router: stream attempt failed, returning upstream error", fields)
 		}
 		if emitted || index == len(attempts)-1 || !fallbackAllowed {
 			return errForward

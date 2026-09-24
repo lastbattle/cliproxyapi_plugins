@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"net/http"
 	"testing"
 )
 
@@ -62,5 +63,34 @@ func TestStatusFromError(t *testing.T) {
 	}
 	if got := statusFromError(errors.New("model execution failed with status 429")); got != 429 {
 		t.Fatalf("statusFromError(message) = %d, want 429", got)
+	}
+}
+
+// CPA can report an auth-unavailable/overload failure with a numeric status the
+// operator did not enumerate. The message text still identifies a retryable
+// condition, so the classifier must consult it rather than treating it as terminal.
+func TestShouldFallbackRecognizesCodexAuthUnavailableOnUnlistedStatus(t *testing.T) {
+	settings := fallbackSettings{
+		Enabled:            true,
+		FallbackOnStatus:   []int{401, 403, 408, 409, 429, 500, 502, 503, 504},
+		NoFallbackOnStatus: []int{400, 404, 422},
+	}
+	shape := errors.New("unexpected status 501 Service Unavailable: auth_unavailable: no auth available (providers=codex, model=gpt-5.6-sol; last upstream error: server_is_overloaded: Our servers are currently overloaded. Please try again later.)")
+	if !shouldFallback(501, shape, settings) {
+		t.Fatal("shouldFallback(501, codex auth_unavailable shape) = false, want true")
+	}
+	if !shouldFallback(0, shape, settings) {
+		t.Fatal("shouldFallback(0, codex auth_unavailable shape) = false, want true")
+	}
+	if !shouldFallback(0, errors.New("server_is_overloaded"), settings) {
+		t.Fatal("shouldFallback(0, server_is_overloaded) = false, want true")
+	}
+	// An operator-configured terminal status still wins over matching text.
+	if shouldFallback(http.StatusNotFound, shape, settings) {
+		t.Fatal("shouldFallback(404, codex auth_unavailable shape) = true, want false")
+	}
+	// An unlisted status with no recognizable text stays terminal.
+	if shouldFallback(501, errors.New("some unexpected upstream fault"), settings) {
+		t.Fatal("shouldFallback(501, generic text) = true, want false")
 	}
 }

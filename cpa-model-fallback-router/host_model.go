@@ -25,6 +25,28 @@ type rpcStreamCloseRequest struct {
 	Error    string `json:"error,omitempty"`
 }
 
+type hostLogRequest struct {
+	HostCallbackID string         `json:"host_callback_id,omitempty"`
+	Level          string         `json:"level,omitempty"`
+	Message        string         `json:"message,omitempty"`
+	Fields         map[string]any `json:"fields,omitempty"`
+}
+
+// logHost emits a best-effort structured log line through the CPA host so routing
+// and fallback decisions are visible in the host log stream. A logging failure is
+// never allowed to affect request handling.
+func logHost(hostCallbackID, level, message string, fields map[string]any) {
+	if strings.TrimSpace(message) == "" {
+		return
+	}
+	_, _ = callHost(pluginabi.MethodHostLog, hostLogRequest{
+		HostCallbackID: hostCallbackID,
+		Level:          level,
+		Message:        message,
+		Fields:         fields,
+	})
+}
+
 func executeHostModel(exec pluginapi.ExecutorRequest, hostCallbackID, model, entryProtocol, responseProtocol string, body []byte) (pluginapi.HostModelExecutionResponse, error) {
 	result, errCall := callHost(pluginabi.MethodHostModelExecute, hostModelExecutionRequest{
 		HostModelExecutionRequest: hostModelExecutionPayload(exec, model, entryProtocol, responseProtocol, false, body),
@@ -116,3 +138,13 @@ func closePluginStream(streamID, errMsg string) {
 		Error:    strings.TrimSpace(errMsg),
 	})
 }
+
+// Host model stream calls are indirected so the upstream-first buffering and
+// retry orchestration can be exercised without a live plugin host.
+var (
+	startHostModelStreamFn  = startHostModelStream
+	readHostModelStreamFn   = readHostModelStream
+	emitPluginStreamChunkFn = emitPluginStreamChunk
+	closeHostModelStreamFn  = closeHostModelStream
+	logHostFn               = logHost
+)

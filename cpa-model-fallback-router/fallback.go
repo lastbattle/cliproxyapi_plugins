@@ -57,7 +57,11 @@ func shouldFallback(status int, err error, settings fallbackSettings) bool {
 	if statusInList(status, settings.FallbackOnStatus) {
 		return true
 	}
-	return status == 0 && (isNetworkError(err) || isRateLimitError(err) || isAuthUnavailableError(err) || isModelUnavailableError(err))
+	// The operator status lists stay authoritative. For any status they do not
+	// name, and for a status CPA did not preserve, consult the error text: CPA
+	// sometimes carries an unlisted code alongside an auth-unavailable, cooldown,
+	// overload, quota, or transport failure that another model can still serve.
+	return isNetworkError(err) || isRateLimitError(err) || isAuthUnavailableError(err) || isModelUnavailableError(err)
 }
 
 func statusInList(status int, list []int) bool {
@@ -177,6 +181,8 @@ func isModelUnavailableError(err error) bool {
 		"no provider for model",
 		"provider unavailable",
 		"model unavailable",
+		"server_is_overloaded",
+		"model_at_capacity",
 		"selected model is at capacity",
 		"servers are currently overloaded",
 		"server is overloaded",
