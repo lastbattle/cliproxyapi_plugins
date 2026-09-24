@@ -71,6 +71,29 @@ func TestRunExecutionFallbackUsesFallbackOnContextWindowStatus400(t *testing.T) 
 	}
 }
 
+func TestRunExecutionFallbackRetriesCapacityErrorBodyWithHTTP200(t *testing.T) {
+	configureFallbackTest(t, 60)
+	calls := make([]string, 0, 2)
+	executeHostModelAttempt = func(_ pluginapi.ExecutorRequest, _ string, model, _, _ string, _ []byte) (pluginapi.HostModelExecutionResponse, error) {
+		calls = append(calls, model)
+		if model == "claude-sonnet-4-5" {
+			return pluginapi.HostModelExecutionResponse{StatusCode: http.StatusOK, Body: []byte(`{"error":{"message":"Selected model is at capacity. Please try a different model."}}`)}, nil
+		}
+		return pluginapi.HostModelExecutionResponse{StatusCode: http.StatusOK, Body: []byte(`{"ok":true}`)}, nil
+	}
+
+	body, _, _, err := runExecutionFallback(testExecutorRequest(), "callback-1")
+	if err != nil {
+		t.Fatalf("runExecutionFallback() error = %v", err)
+	}
+	if string(body) != `{"ok":true}` {
+		t.Fatalf("body = %s, want fallback payload", body)
+	}
+	if !reflect.DeepEqual(calls, []string{"claude-sonnet-4-5", "gpt-5.4"}) {
+		t.Fatalf("calls = %#v, want primary then fallback", calls)
+	}
+}
+
 func TestRunExecutionFallbackSkipsPrimaryDuringCooldown(t *testing.T) {
 	cfg := configureFallbackTest(t, 60)
 	key := fallbackCooldownKey("claude", cfg.Rules[0], "claude-sonnet-4-5")

@@ -171,6 +171,12 @@ func isAuthUnavailableError(err error) bool {
 	return false
 }
 
+// CPA has emitted model-capacity failures in both ordinary executor bodies
+// and stream terminal events. Keep the provider wording here as a reference:
+//
+//	{"error":{"message":"Selected model is at capacity. Please try a different model."}}
+//	{"type":"error","error":{"code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later."}}
+//	{"type":"response.failed","response":{"status":"failed","error":{"code":"server_is_overloaded","message":"..."}}}
 func isModelUnavailableError(err error) bool {
 	if err == nil {
 		return false

@@ -11,7 +11,15 @@ import (
 // streamGate delays the first client-visible bytes until the upstream has
 // produced a non-error stream event. This leaves a retry window for providers
 // that report overload as an SSE response.failed/error event after returning
-// HTTP 200.
+// HTTP 200. CPA's observed terminal shapes include:
+//
+//	event: response.failed
+//	data: {"type":"response.failed","response":{"status":"failed","error":{"code":"server_is_overloaded","message":"Selected model is at capacity. Please try a different model."}}}
+//
+// and:
+//
+//	event: error
+//	data: {"type":"error","error":{"code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later."}}
 type streamGate struct {
 	buf       bytes.Buffer
 	committed bool

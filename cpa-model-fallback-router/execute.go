@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -90,25 +91,33 @@ func runExecutionFallback(exec pluginapi.ExecutorRequest, hostCallbackID string)
 		}
 		resp, errExecute := executeHostModelAttempt(exec, hostCallbackID, model, bodyInfo.EntryProtocol, bodyInfo.ResponseProtocol, body)
 		status := responseStatus(resp.StatusCode, errExecute)
+		// CPA can preserve an upstream failure body while reporting the host
+		// execution as HTTP 200. Treat structured capacity/overload bodies as
+		// failures so the fallback chain gets a chance to run.
 		if errExecute == nil && successStatus(status) {
-			metadata := attemptMetadata(rule, attempts, model, index, plan.PrimarySkipped)
-			mergeMetadata(metadata, transformMetadata)
-			logHostFn(hostCallbackID, "info", "model-fallback-router: attempt succeeded", map[string]any{
-				"rule":                  rule.Name,
-				"selected_model":        model,
-				"selected_attempt":      index,
-				"fallback_used":         plan.PrimarySkipped || index > 0,
-				"primary_cooldown_skip": plan.PrimarySkipped,
-			})
-			payload := resp.Body
-			if unwrapAuditedExit {
-				unwrapped, exitMetadata, okUnwrap := unwrapAuditedExitResponse(resolveExecutionTransform(cfg, rule), bodyInfo.ResponseProtocol, resp.Body)
-				mergeMetadata(metadata, exitMetadata)
-				if okUnwrap {
-					payload = unwrapped
+			if bodyErr := hostModelBodyError(resp.Body); bodyErr != nil {
+				errExecute = bodyErr
+				status = statusFromError(bodyErr)
+			} else {
+				metadata := attemptMetadata(rule, attempts, model, index, plan.PrimarySkipped)
+				mergeMetadata(metadata, transformMetadata)
+				logHostFn(hostCallbackID, "info", "model-fallback-router: attempt succeeded", map[string]any{
+					"rule":                  rule.Name,
+					"selected_model":        model,
+					"selected_attempt":      index,
+					"fallback_used":         plan.PrimarySkipped || index > 0,
+					"primary_cooldown_skip": plan.PrimarySkipped,
+				})
+				payload := resp.Body
+				if unwrapAuditedExit {
+					unwrapped, exitMetadata, okUnwrap := unwrapAuditedExitResponse(resolveExecutionTransform(cfg, rule), bodyInfo.ResponseProtocol, resp.Body)
+					mergeMetadata(metadata, exitMetadata)
+					if okUnwrap {
+						payload = unwrapped
+					}
 				}
+				return payload, cloneHeader(resp.Headers), metadata, nil
 			}
-			return payload, cloneHeader(resp.Headers), metadata, nil
 		}
 		if errExecute == nil {
 			errExecute = hostModelStatusError(model, status, resp.Body)
@@ -158,6 +167,35 @@ func hostModelErrorSummary(body []byte) string {
 		summary = summary[:512]
 	}
 	return summary
+}
+
+func hostModelBodyError(body []byte) error {
+	var value map[string]any
+	if json.Unmarshal(bytes.TrimSpace(body), &value) != nil {
+		return nil
+	}
+	if !isStructuredModelFailure(value) {
+		return nil
+	}
+	message := hostModelErrorSummary(body)
+	return statusError{status: http.StatusBadGateway, message: message}
+}
+
+func isStructuredModelFailure(value map[string]any) bool {
+	if value == nil {
+		return false
+	}
+	if nested, ok := value["error"].(map[string]any); ok {
+		return isModelUnavailableError(statusError{message: hostModelErrorSummaryMap(nested)}) ||
+			isRateLimitError(statusError{message: hostModelErrorSummaryMap(nested)}) ||
+			isAuthUnavailableError(statusError{message: hostModelErrorSummaryMap(nested)})
+	}
+	return false
+}
+
+func hostModelErrorSummaryMap(value map[string]any) string {
+	encoded, _ := json.Marshal(value)
+	return string(encoded)
 }
 
 func attemptMetadata(rule fallbackRule, attempts []string, selected string, index int, primarySkipped bool) map[string]any {
