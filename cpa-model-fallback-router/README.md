@@ -225,6 +225,43 @@ The plugin does not call upstream providers directly. It delegates all model exe
 
 ## Troubleshooting
 
+### CLIProxyAPI will not restart after replacing the plugin
+
+On macOS, a newly built `.dylib` must be code-signed before CLIProxyAPI loads
+it. An unsigned or modified binary can make `dyld` terminate CLIProxyAPI with
+`SIGKILL (Code Signature Invalid)` / `CODESIGNING: Invalid Page`. Build and
+sign the arm64 artifact, then verify it before installing:
+
+```bash
+go build -trimpath -buildmode=c-shared -o dist/model-fallback-router.dylib .
+codesign --force --sign - --timestamp=none dist/model-fallback-router.dylib
+codesign --verify --verbose dist/model-fallback-router.dylib
+```
+
+Install it with an atomic replacement and keep a rollback copy. If the service
+still fails, rename the active file out of the plugin directory, restart CPA,
+and inspect the crash report before trying another build. Do not repeatedly
+restart with an unsigned binary.
+
+The plugin's metadata name and the host-local filename may differ. If the file
+is installed as `capacity-retry.dylib`, the model router must target the
+host-provided plugin ID `capacity-retry`; targeting the metadata name
+`model-fallback-router` makes CPA log `returned unavailable executor plugin`.
+
+For streams, do not use empty emitted chunks as a client-disconnect probe. CPA
+interprets stream chunks as response data, and an empty probe can cause
+`502 Bad Gateway: upstream stream closed before first payload`. Stream
+cancellation should use the host-owned stream context and close callbacks.
+
+When diagnosing a failed replacement, check these first:
+
+```bash
+brew services list | grep cliproxyapi
+codesign --verify --verbose ~/.cli-proxy-api/plugins/darwin/arm64/capacity-retry.dylib
+rg -i 'Code Signature Invalid|unavailable executor|upstream stream closed' \
+  ~/.cli-proxy-api/logs ~/Library/Logs/DiagnosticReports
+```
+
 - CPA does not list the plugin: confirm `plugins.enabled` is `true`, `plugins.dir` points at the mounted directory, and the library filename is exactly `model-fallback-router.so`, `model-fallback-router.dylib`, or `model-fallback-router.dll` for the host platform.
 - Requests do not fall back: confirm the requested model matches `rules[].models`, the inbound format matches `rules[].source_formats`, and the failure status is not listed in `no_fallback_on_status`. If CPA reports `unknown provider for model ...` after disabling an account, use v0.1.3 or newer.
 - The wrong fallback rule runs: rules are first-match-wins, so move the narrow rule above broader model patterns.
