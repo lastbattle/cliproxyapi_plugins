@@ -48,6 +48,9 @@ func shouldFallback(status int, err error, settings fallbackSettings) bool {
 	if !settings.Enabled {
 		return false
 	}
+	if isCancellation(err) {
+		return false
+	}
 	if (status == 0 || status == http.StatusBadRequest) && isContextWindowError(err) {
 		return true
 	}
@@ -182,6 +185,10 @@ func isModelUnavailableError(err error) bool {
 		return false
 	}
 	message := strings.ToLower(err.Error())
+	// CPA may wrap the provider text across lines or add a display marker
+	// (for example, "■ Selected model is at capacity..."). Collapse layout
+	// whitespace before matching so formatting does not change retry behavior.
+	message = strings.Join(strings.Fields(message), " ")
 	for _, token := range []string{
 		"unknown provider",
 		"no provider for model",
@@ -190,7 +197,10 @@ func isModelUnavailableError(err error) bool {
 		"server_is_overloaded",
 		"model_at_capacity",
 		"selected model is at capacity",
+		"model is at capacity",
+		"at capacity. please try a different model",
 		"servers are currently overloaded",
+		"currently overloaded",
 		"server is overloaded",
 		"model is overloaded",
 	} {

@@ -99,6 +99,26 @@ plugins:
 
 ## Configuration Rules
 
+Retry timing is configured under `fallback`: `retry_base_ms` (default 500),
+`retry_max_ms` (default 8000), and `max_elapsed_seconds` (default 600).
+Exponential delays use equal jitter (half to full delay) and apply between
+attempts, including repeated `$requested` entries. Ten repeated entries mean
+ten retries plus the initial attempt. The deadline includes generation time;
+increase it for long-running responses (maximum 3600 seconds).
+
+The stream runner probes the host output stream with empty, non-content chunks
+once per second to detect client disconnection. Cancellation stops backoff and
+closes an active model stream. The native ABI cannot forcibly interrupt a
+synchronous host callback: the plugin stops waiting at its deadline, closes
+late stream-open results, and leaves non-stream upstream cancellation to CPA.
+
+Failure logs contain a callback request ID, attempt/limit, elapsed time, delay,
+error category, allowlisted error code, and stop reason. They exclude raw
+prompts and error bodies. Enable CPA `logging-to-file` with a finite
+`logs-max-total-size-mb` to retain this trail. An exhausted capacity retry and
+a non-retryable `model_not_found` require different remedies; missing provider
+routing is not repaired by repeating the same model.
+
 - `rules[].models` matches the client-requested model with `*` wildcards.
 - Rules are first-match-wins. Put narrow model patterns before broader patterns such as `*`.
 - Unknown YAML keys are ignored for CPA and legacy-config compatibility, so copy documented field names exactly.

@@ -150,6 +150,7 @@ func TestRunExecutionFallbackStreamRetriesStreamedCapacityFailure(t *testing.T) 
 	state := stubHostStream(t, map[string][]pluginapi.HostModelStreamReadResponse{
 		"claude-sonnet-4-5": {
 			{Payload: []byte("data: {\"type\":\"response.created\"}\n\n")},
+			{Payload: []byte("data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"message\",\"content\":[]}}\n\n")},
 			{Payload: []byte(capacityFailureFrame)},
 		},
 		"gpt-5.4": {
@@ -174,6 +175,15 @@ func TestRunExecutionFallbackStreamRetriesStreamedCapacityFailure(t *testing.T) 
 	}
 	if strings.Contains(string(state.emitted[0]), "response.failed") {
 		t.Fatal("failed primary attempt leaked into the client stream")
+	}
+}
+
+func TestStreamGatePreservesQuotedCapacityText(t *testing.T) {
+	g := &streamGate{}
+	payload := []byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"Selected model is at capacity. Please try a different model.\"}\n\n")
+	got, err, ready := g.push(payload)
+	if err != nil || !ready || string(got) != string(payload) {
+		t.Fatalf("ordinary content changed: %q, %v, %v", got, err, ready)
 	}
 }
 

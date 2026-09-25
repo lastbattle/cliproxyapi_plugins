@@ -51,18 +51,6 @@ func (g *streamGate) push(payload []byte) (flush []byte, failure error, ready bo
 }
 
 func streamPayloadFailure(payload []byte) error {
-	text := strings.ToLower(string(payload))
-	for _, token := range []string{
-		"selected model is at capacity",
-		"servers are currently overloaded",
-		"server is overloaded",
-		"model is overloaded",
-		"provider unavailable",
-	} {
-		if strings.Contains(text, token) {
-			return statusError{status: http.StatusBadGateway, message: strings.TrimSpace(string(payload))}
-		}
-	}
 	if value, ok := rawJSONObject(payload); ok && streamJSONFailure(value) {
 		return statusError{status: streamStatus(value), message: streamErrorMessage(value)}
 	}
@@ -100,6 +88,16 @@ func streamPayloadReady(payload []byte) bool {
 		}
 		kind, _ := record["type"].(string)
 		kind = strings.ToLower(kind)
+		// Responses metadata is not generated content. Hold empty item/part
+		// announcements until a delta or terminal record makes forwarding safe.
+		if strings.HasPrefix(kind, "response.") &&
+			(kind == "response.output_item.added" || kind == "response.content_part.added" ||
+				kind == "response.reasoning_summary_part.added" || kind == "response.queued") {
+			item, _ := record["item"].(map[string]any)
+			if item["type"] != "function_call" {
+				continue
+			}
+		}
 		if strings.HasSuffix(kind, ".delta") || strings.HasSuffix(kind, ".completed") ||
 			strings.HasSuffix(kind, ".stop") || kind == "content_block_start" ||
 			kind == "message_delta" || kind == "message_stop" {
@@ -118,7 +116,8 @@ func streamPayloadReady(payload []byte) bool {
 func sseRecords(payload []byte) []map[string]any {
 	parts := bytes.Split(bytes.ReplaceAll(payload, []byte("\r\n"), []byte("\n")), []byte("\n\n"))
 	result := make([]map[string]any, 0, len(parts))
-	for _, part := range parts {
+	// Only inspect complete SSE frames; network chunks may split JSON or lines.
+	for _, part := range parts[:len(parts)-1] {
 		for _, line := range bytes.Split(part, []byte("\n")) {
 			line = bytes.TrimSpace(line)
 			if !bytes.HasPrefix(line, []byte("data:")) {
@@ -144,7 +143,7 @@ func streamJSONFailure(value map[string]any) bool {
 	for _, key := range []string{"type", "event_type", "status", "code"} {
 		if text, ok := value[key].(string); ok {
 			lower := strings.ToLower(text)
-			if lower == "error" || lower == "response.failed" || lower == "failed" ||
+			if lower == "error" || lower == "response.failed" || lower == "response.error" || lower == "failed" ||
 				strings.Contains(lower, "overload") || strings.Contains(lower, "capacity") {
 				return true
 			}
@@ -168,6 +167,15 @@ func streamErrorMessage(value map[string]any) string {
 	if value == nil {
 		return "streamed upstream model failure"
 	}
+	for _, key := range []string{"error", "response"} {
+		if nested, ok := value[key].(map[string]any); ok {
+			return streamErrorMessage(nested)
+		}
+	}
+	// Preserve code/type alongside message, without serializing response content.
+	if message, ok := value["message"].(string); ok {
+		return fmt.Sprintf("%v %v: %s", value["type"], value["code"], message)
+	}
 	for _, key := range []string{"message", "detail", "error"} {
 		if text, ok := value[key].(string); ok && strings.TrimSpace(text) != "" {
 			return text
@@ -189,6 +197,11 @@ func streamStatus(value map[string]any) int {
 			if _, err := fmt.Sscan(number, &status); err == nil && status >= 400 {
 				return status
 			}
+		}
+	}
+	for _, key := range []string{"error", "response"} {
+		if nested, ok := value[key].(map[string]any); ok {
+			return streamStatus(nested)
 		}
 	}
 	return http.StatusBadGateway

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
@@ -51,7 +52,7 @@ func startExecutorStream(req rpcExecutorRequest, runner streamOrchestrationRunne
 	})
 }
 
-func runExecutionFallbackStream(_ context.Context, exec pluginapi.ExecutorRequest, hostCallbackID, pluginStreamID string) error {
+func runExecutionFallbackStream(parent context.Context, exec pluginapi.ExecutorRequest, hostCallbackID, pluginStreamID string) error {
 	cfg := loadedConfig()
 	reqModel := strings.TrimSpace(exec.Model)
 	rule, ok := matchingRule(cfg, executionSourceFormat(exec), reqModel)
@@ -64,6 +65,12 @@ func runExecutionFallbackStream(_ context.Context, exec pluginapi.ExecutorReques
 		return statusError{status: http.StatusBadGateway, message: "no fallback rule matched executor stream request"}
 	}
 	policy := fallbackPolicy(cfg, rule)
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, time.Duration(policy.MaxElapsedSeconds)*time.Second)
+	defer cancel()
+	started := time.Now()
 	primary := resolveModelToken(rule.PrimaryModel, reqModel)
 	cooldownKey := fallbackCooldownKey(executionSourceFormat(exec), rule, primary)
 	_, primarySkipped := primaryCooldowns.active(cooldownKey)
@@ -72,7 +79,8 @@ func runExecutionFallbackStream(_ context.Context, exec pluginapi.ExecutorReques
 	if len(attempts) == 0 {
 		return statusError{status: http.StatusBadGateway, message: "fallback rule produced no stream model attempts"}
 	}
-	logHostFn(hostCallbackID, "debug", "model-fallback-router: starting fallback stream chain", map[string]any{
+	logHostFn(hostCallbackID, "info", "model-fallback-router: starting fallback stream chain", map[string]any{
+		"request_id":            hostCallbackID,
 		"requested_model":       reqModel,
 		"source_format":         normalizeProtocol(executionSourceFormat(exec)),
 		"rule":                  rule.Name,
@@ -83,12 +91,17 @@ func runExecutionFallbackStream(_ context.Context, exec pluginapi.ExecutorReques
 	var lastErr error
 	bodyInfo := requestBodyInfo(exec)
 	for index, model := range attempts {
+		delay := retryDelay(policy, index)
+		if err := waitRetry(ctx, delay); err != nil {
+			logHostFn(hostCallbackID, "warn", "model-fallback-router: retry wait stopped", retryFields(hostCallbackID, index, len(attempts), started, err, false, false))
+			return err
+		}
 		body := requestBodyForModel(bodyInfo.Body, model)
 		body, _, _, errTransform := applyExecutionTransform(cfg, exec, rule, model, bodyInfo.EntryProtocol, body)
 		if errTransform != nil {
 			return errTransform
 		}
-		status, emitted, errForward := forwardHostModelStream(exec, hostCallbackID, model, bodyInfo.EntryProtocol, bodyInfo.ResponseProtocol, body, pluginStreamID)
+		status, emitted, errForward := forwardHostModelStreamContext(ctx, exec, hostCallbackID, model, bodyInfo.EntryProtocol, bodyInfo.ResponseProtocol, body, pluginStreamID)
 		if errForward == nil && successStatus(responseStatus(status, nil)) {
 			logHostFn(hostCallbackID, "info", "model-fallback-router: stream attempt succeeded", map[string]any{
 				"rule":                  rule.Name,
@@ -103,7 +116,7 @@ func runExecutionFallbackStream(_ context.Context, exec pluginapi.ExecutorReques
 			errForward = statusError{status: status, message: fmt.Sprintf("host model %s stream returned status %d", model, status)}
 		}
 		lastErr = errForward
-		fallbackAllowed := shouldFallback(responseStatus(status, errForward), errForward, policy)
+		fallbackAllowed := ctx.Err() == nil && shouldFallback(responseStatus(status, errForward), errForward, policy)
 		if fallbackAllowed && strings.EqualFold(model, plan.Primary) {
 			primaryCooldowns.mark(cooldownKey, fallbackCooldownDuration(policy))
 		}
@@ -115,6 +128,8 @@ func runExecutionFallbackStream(_ context.Context, exec pluginapi.ExecutorReques
 			"fallback_eligible": fallbackAllowed,
 			"client_emitted":    emitted,
 		}
+		mergeMetadata(fields, retryFields(hostCallbackID, index, len(attempts), started, errForward, fallbackAllowed, emitted))
+		fields["delay_before_attempt_ms"] = delay.Milliseconds()
 		if fallbackAllowed && !emitted && index < len(attempts)-1 {
 			fields["next_model"] = attempts[index+1]
 			logHostFn(hostCallbackID, "info", "model-fallback-router: stream attempt failed, falling back", fields)
@@ -132,7 +147,13 @@ func runExecutionFallbackStream(_ context.Context, exec pluginapi.ExecutorReques
 }
 
 func forwardHostModelStream(exec pluginapi.ExecutorRequest, hostCallbackID, model, entryProtocol, responseProtocol string, body []byte, pluginStreamID string) (int, bool, error) {
-	resp, errStart := startHostModelStreamFn(exec, hostCallbackID, model, entryProtocol, responseProtocol, body)
+	return forwardHostModelStreamContext(context.Background(), exec, hostCallbackID, model, entryProtocol, responseProtocol, body, pluginStreamID)
+}
+
+func forwardHostModelStreamContext(ctx context.Context, exec pluginapi.ExecutorRequest, hostCallbackID, model, entryProtocol, responseProtocol string, body []byte, pluginStreamID string) (int, bool, error) {
+	resp, errStart := awaitHost(ctx, func() (pluginapi.HostModelStreamResponse, error) {
+		return startHostModelStreamFn(exec, hostCallbackID, model, entryProtocol, responseProtocol, body)
+	}, func(resp pluginapi.HostModelStreamResponse) { _ = closeHostModelStreamFn(resp.StreamID) })
 	if errStart != nil {
 		return responseStatus(0, errStart), false, errStart
 	}
@@ -148,7 +169,7 @@ func forwardHostModelStream(exec pluginapi.ExecutorRequest, hostCallbackID, mode
 	emitted := false
 	gate := &streamGate{}
 	for {
-		chunk, errRead := readHostModelStreamFn(resp.StreamID)
+		chunk, errRead := awaitHost(ctx, func() (pluginapi.HostModelStreamReadResponse, error) { return readHostModelStreamFn(resp.StreamID) }, nil)
 		if errRead != nil {
 			return responseStatus(0, errRead), emitted, errRead
 		}

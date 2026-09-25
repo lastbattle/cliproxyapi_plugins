@@ -35,6 +35,9 @@ type fallbackRule struct {
 }
 
 type fallbackSettings struct {
+	RetryBaseMS        int   `yaml:"retry_base_ms"`
+	RetryMaxMS         int   `yaml:"retry_max_ms"`
+	MaxElapsedSeconds  int   `yaml:"max_elapsed_seconds"`
 	Enabled            bool  `yaml:"enabled"`
 	FallbackOnStatus   []int `yaml:"fallback_on_status"`
 	NoFallbackOnStatus []int `yaml:"no_fallback_on_status"`
@@ -93,6 +96,9 @@ func defaultPluginConfig() pluginConfig {
 	return pluginConfig{
 		Enabled: false,
 		Fallback: fallbackSettings{
+			RetryBaseMS:        500,
+			RetryMaxMS:         8000,
+			MaxElapsedSeconds:  600,
 			Enabled:            true,
 			FallbackOnStatus:   append([]int(nil), defaultFallbackOnStatus...),
 			NoFallbackOnStatus: append([]int(nil), defaultNoFallbackOnStatus...),
@@ -160,6 +166,9 @@ func validateConfig(cfg pluginConfig) error {
 	}
 	if cfg.Fallback.CooldownSeconds < 0 {
 		return fmt.Errorf("fallback.cooldown_seconds must be >= 0")
+	}
+	if cfg.Fallback.RetryBaseMS < 0 || cfg.Fallback.RetryMaxMS < cfg.Fallback.RetryBaseMS || cfg.Fallback.RetryMaxMS > 60000 || cfg.Fallback.MaxElapsedSeconds < 1 || cfg.Fallback.MaxElapsedSeconds > 3600 {
+		return fmt.Errorf("fallback requires 0 <= retry_base_ms <= retry_max_ms <= 60000 and 1 <= max_elapsed_seconds <= 3600")
 	}
 	if err := validateExecutionTransformSettings("execution_transform", cfg.ExecutionTransform); err != nil {
 		return err

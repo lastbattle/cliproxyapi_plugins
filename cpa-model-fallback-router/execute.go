@@ -2,10 +2,12 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
@@ -33,8 +35,11 @@ func routeModel(raw []byte) ([]byte, error) {
 	return okEnvelope(pluginapi.ModelRouteResponse{
 		Handled:    true,
 		TargetKind: pluginapi.ModelRouteTargetExecutor,
-		Target:     pluginIdentifier,
-		Reason:     pluginIdentifier + ":matched",
+		// CPA derives the host-local ID from the installed filename. A library
+		// installed as capacity-retry.dylib must target capacity-retry, not its
+		// metadata name, or CPA bypasses this executor as unavailable.
+		Target: firstNonEmpty(req.PluginID, pluginIdentifier),
+		Reason: pluginIdentifier + ":matched",
 	})
 }
 
@@ -65,6 +70,9 @@ func runExecutionFallback(exec pluginapi.ExecutorRequest, hostCallbackID string)
 		return nil, nil, nil, statusError{status: http.StatusBadGateway, message: "no fallback rule matched executor request"}
 	}
 	policy := fallbackPolicy(cfg, rule)
+	started := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(policy.MaxElapsedSeconds)*time.Second)
+	defer cancel()
 	primary := resolveModelToken(rule.PrimaryModel, reqModel)
 	cooldownKey := fallbackCooldownKey(executionSourceFormat(exec), rule, primary)
 	_, primarySkipped := primaryCooldowns.active(cooldownKey)
@@ -73,7 +81,8 @@ func runExecutionFallback(exec pluginapi.ExecutorRequest, hostCallbackID string)
 	if len(attempts) == 0 {
 		return nil, nil, nil, statusError{status: http.StatusBadGateway, message: "fallback rule produced no model attempts"}
 	}
-	logHostFn(hostCallbackID, "debug", "model-fallback-router: starting fallback chain", map[string]any{
+	logHostFn(hostCallbackID, "info", "model-fallback-router: starting fallback chain", map[string]any{
+		"request_id":            hostCallbackID,
 		"requested_model":       reqModel,
 		"source_format":         normalizeProtocol(executionSourceFormat(exec)),
 		"rule":                  rule.Name,
@@ -84,12 +93,19 @@ func runExecutionFallback(exec pluginapi.ExecutorRequest, hostCallbackID string)
 	var lastErr error
 	bodyInfo := requestBodyInfo(exec)
 	for index, model := range attempts {
+		delay := retryDelay(policy, index)
+		if err := waitRetry(ctx, delay); err != nil {
+			logHostFn(hostCallbackID, "warn", "model-fallback-router: retry wait stopped", retryFields(hostCallbackID, index, len(attempts), started, err, false, false))
+			return nil, nil, nil, err
+		}
 		body := requestBodyForModel(bodyInfo.Body, model)
 		body, transformMetadata, unwrapAuditedExit, errTransform := applyExecutionTransform(cfg, exec, rule, model, bodyInfo.EntryProtocol, body)
 		if errTransform != nil {
 			return nil, nil, transformMetadata, errTransform
 		}
-		resp, errExecute := executeHostModelAttempt(exec, hostCallbackID, model, bodyInfo.EntryProtocol, bodyInfo.ResponseProtocol, body)
+		resp, errExecute := awaitHost(ctx, func() (pluginapi.HostModelExecutionResponse, error) {
+			return executeHostModelAttempt(exec, hostCallbackID, model, bodyInfo.EntryProtocol, bodyInfo.ResponseProtocol, body)
+		}, nil)
 		status := responseStatus(resp.StatusCode, errExecute)
 		// CPA can preserve an upstream failure body while reporting the host
 		// execution as HTTP 200. Treat structured capacity/overload bodies as
@@ -123,7 +139,7 @@ func runExecutionFallback(exec pluginapi.ExecutorRequest, hostCallbackID string)
 			errExecute = hostModelStatusError(model, status, resp.Body)
 		}
 		lastErr = errExecute
-		fallbackAllowed := shouldFallback(status, errExecute, policy)
+		fallbackAllowed := ctx.Err() == nil && shouldFallback(status, errExecute, policy)
 		if fallbackAllowed && strings.EqualFold(model, plan.Primary) {
 			primaryCooldowns.mark(cooldownKey, fallbackCooldownDuration(policy))
 		}
@@ -134,6 +150,8 @@ func runExecutionFallback(exec pluginapi.ExecutorRequest, hostCallbackID string)
 			"status":            status,
 			"fallback_eligible": fallbackAllowed,
 		}
+		mergeMetadata(fields, retryFields(hostCallbackID, index, len(attempts), started, errExecute, fallbackAllowed, false))
+		fields["delay_before_attempt_ms"] = delay.Milliseconds()
 		if fallbackAllowed && index < len(attempts)-1 {
 			fields["next_model"] = attempts[index+1]
 			logHostFn(hostCallbackID, "info", "model-fallback-router: attempt failed, falling back", fields)
@@ -174,28 +192,10 @@ func hostModelBodyError(body []byte) error {
 	if json.Unmarshal(bytes.TrimSpace(body), &value) != nil {
 		return nil
 	}
-	if !isStructuredModelFailure(value) {
+	if !streamJSONFailure(value) {
 		return nil
 	}
-	message := hostModelErrorSummary(body)
-	return statusError{status: http.StatusBadGateway, message: message}
-}
-
-func isStructuredModelFailure(value map[string]any) bool {
-	if value == nil {
-		return false
-	}
-	if nested, ok := value["error"].(map[string]any); ok {
-		return isModelUnavailableError(statusError{message: hostModelErrorSummaryMap(nested)}) ||
-			isRateLimitError(statusError{message: hostModelErrorSummaryMap(nested)}) ||
-			isAuthUnavailableError(statusError{message: hostModelErrorSummaryMap(nested)})
-	}
-	return false
-}
-
-func hostModelErrorSummaryMap(value map[string]any) string {
-	encoded, _ := json.Marshal(value)
-	return string(encoded)
+	return statusError{status: streamStatus(value), message: streamErrorMessage(value)}
 }
 
 func attemptMetadata(rule fallbackRule, attempts []string, selected string, index int, primarySkipped bool) map[string]any {

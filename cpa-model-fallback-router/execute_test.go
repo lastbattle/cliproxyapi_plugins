@@ -94,6 +94,26 @@ func TestRunExecutionFallbackRetriesCapacityErrorBodyWithHTTP200(t *testing.T) {
 	}
 }
 
+func TestRunExecutionFallbackRetriesWrappedOverloadBody(t *testing.T) {
+	configureFallbackTest(t, 60)
+	calls := make([]string, 0, 2)
+	executeHostModelAttempt = func(_ pluginapi.ExecutorRequest, _ string, model, _, _ string, _ []byte) (pluginapi.HostModelExecutionResponse, error) {
+		calls = append(calls, model)
+		if model == "claude-sonnet-4-5" {
+			return pluginapi.HostModelExecutionResponse{StatusCode: http.StatusServiceUnavailable, Body: []byte(`{"error":{"message":"auth_unavailable: no auth available (providers=codex, model=gpt-5.6-sol; last upstream error: server_is_overloaded: Our servers are currently overloaded. Please try again later.)","type":"server_error","code":"internal_server_error"}}`)}, nil
+		}
+		return pluginapi.HostModelExecutionResponse{StatusCode: http.StatusOK, Body: []byte(`{"ok":true}`)}, nil
+	}
+
+	body, _, _, err := runExecutionFallback(testExecutorRequest(), "callback-1")
+	if err != nil || string(body) != `{"ok":true}` {
+		t.Fatalf("runExecutionFallback() = body %s, err %v; want fallback success", body, err)
+	}
+	if !reflect.DeepEqual(calls, []string{"claude-sonnet-4-5", "gpt-5.4"}) {
+		t.Fatalf("calls = %#v, want primary then fallback", calls)
+	}
+}
+
 func TestRunExecutionFallbackSkipsPrimaryDuringCooldown(t *testing.T) {
 	cfg := configureFallbackTest(t, 60)
 	key := fallbackCooldownKey("claude", cfg.Rules[0], "claude-sonnet-4-5")
@@ -125,6 +145,7 @@ func TestRunExecutionFallbackSkipsPrimaryDuringCooldown(t *testing.T) {
 func TestRouteModelReturnsExplicitExecutorTarget(t *testing.T) {
 	configureFallbackTest(t, 60)
 	rawReq, errMarshal := json.Marshal(rpcModelRouteRequest{ModelRouteRequest: pluginapi.ModelRouteRequest{
+		PluginID:       "capacity-retry",
 		SourceFormat:   "claude",
 		RequestedModel: "claude-haiku-4-5-20251001",
 	}})
@@ -153,8 +174,8 @@ func TestRouteModelReturnsExplicitExecutorTarget(t *testing.T) {
 	if resp.TargetKind != pluginapi.ModelRouteTargetExecutor {
 		t.Fatalf("TargetKind = %q, want %q", resp.TargetKind, pluginapi.ModelRouteTargetExecutor)
 	}
-	if resp.Target != pluginIdentifier {
-		t.Fatalf("Target = %q, want %q", resp.Target, pluginIdentifier)
+	if resp.Target != "capacity-retry" {
+		t.Fatalf("Target = %q, want host-local plugin ID capacity-retry", resp.Target)
 	}
 }
 
