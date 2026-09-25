@@ -36,6 +36,19 @@ func (g *streamGate) flush() []byte {
 const maxStreamPrelude = 256 * 1024
 
 func (g *streamGate) push(payload []byte) (flush []byte, failure error, ready bool) {
+	// CPA's Codex scanner emits complete SSE lines without their delimiters.
+	// Restore framing only for complete lines; leave split JSON/raw SSE intact.
+	if !bytes.ContainsAny(payload, "\r\n") {
+		line := bytes.TrimSpace(payload)
+		if bytes.HasPrefix(line, []byte("event:")) {
+			payload = append(bytes.Clone(payload), '\n')
+		} else if bytes.HasPrefix(line, []byte("data:")) {
+			data := bytes.TrimSpace(line[5:])
+			if json.Valid(data) || bytes.Equal(data, []byte("[DONE]")) {
+				payload = append(bytes.Clone(payload), '\n', '\n')
+			}
+		}
+	}
 	if g.committed {
 		return payload, nil, true
 	}

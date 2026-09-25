@@ -100,6 +100,35 @@ func TestStreamGatePassesThroughAfterCommit(t *testing.T) {
 	}
 }
 
+// CPA's Codex executor yields scanner lines, not raw framed SSE bytes.
+// Preserve the retry window for failure lines and deliver successful content.
+func TestHostScannerLinesRetryCapacityAndDeliverContent(t *testing.T) {
+	configureFallbackTest(t, 60)
+	state := stubHostStream(t, map[string][]pluginapi.HostModelStreamReadResponse{
+		"claude-sonnet-4-5": {
+			{Payload: []byte("event: response.created")},
+			{Payload: []byte(`data: {"type":"response.created"}`)},
+			{Payload: []byte("event: response.failed")},
+			{Payload: []byte(`data: {"type":"response.failed","response":{"error":{"message":"Selected model is at capacity. Please try a different model."}}}`)},
+		},
+		"gpt-5.4": {
+			{Payload: []byte("event: response.output_text.delta")},
+			{Payload: []byte(`data: {"type":"response.output_text.delta","delta":"SMOKE_OK"}`)},
+			{Done: true},
+		},
+	})
+	if err := runExecutionFallbackStream(nil, testExecutorRequest(), "scanner", "output"); err != nil {
+		t.Fatal(err)
+	}
+	if len(state.calls) != 2 || len(state.emitted) != 1 {
+		t.Fatalf("calls=%v emitted=%q", state.calls, state.emitted)
+	}
+	want := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"SMOKE_OK\"}\n\n"
+	if string(state.emitted[0]) != want {
+		t.Fatalf("got %q, want %q", state.emitted[0], want)
+	}
+}
+
 type stubbedHostStream struct {
 	calls   []string
 	emitted [][]byte

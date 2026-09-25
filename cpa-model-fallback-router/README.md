@@ -100,15 +100,14 @@ plugins:
 ## Configuration Rules
 
 Retry timing is configured under `fallback`: `retry_base_ms` (default 500),
-`retry_max_ms` (default 8000), and `max_elapsed_seconds` (default 600).
+`retry_max_ms` (default 8000), and `max_elapsed_seconds` (default 90).
 Exponential delays use equal jitter (half to full delay) and apply between
 attempts, including repeated `$requested` entries. Ten repeated entries mean
 ten retries plus the initial attempt. The deadline includes generation time;
 increase it for long-running responses (maximum 3600 seconds).
 
-The stream runner probes the host output stream with empty, non-content chunks
-once per second to detect client disconnection. Cancellation stops backoff and
-closes an active model stream. The native ABI cannot forcibly interrupt a
+The stream runner does not emit empty disconnect probes. Cancellation stops
+backoff and closes an active model stream. The native ABI cannot forcibly interrupt a
 synchronous host callback: the plugin stops waiting at its deadline, closes
 late stream-open results, and leaves non-stream upstream cancellation to CPA.
 
@@ -268,11 +267,18 @@ rg -i 'Code Signature Invalid|unavailable executor|upstream stream closed' \
 - Only the first fallback is tried: confirm that fallback's own failure is fallback eligible. Statuses `400`, `404`, and `422` stop the chain by default.
 - Disabled primary accounts still get called repeatedly: confirm `cooldown_seconds` is greater than `0`; after the first fallback-eligible auth failure, later requests skip the primary model until the cooldown expires.
 - Streaming requests stop after an upstream error: fallback is only possible before the first stream chunk is sent to the client.
-- Retry chains are bounded to 90 seconds by default, and each native host
-  stream attempt is bounded to 15 seconds. This prevents ten same-model
-  retries from keeping CPA's HTTP server alive past its shutdown deadline.
-  If you override `fallback.max_elapsed_seconds`, keep it short enough for
-  the service manager's stop timeout.
+- Retry chains are bounded to 90 seconds by default, including generation time.
+  There is no separate 15-second attempt timeout. A deadline alone does not
+  guarantee clean shutdown of active native callbacks.
+- September 24 live A/B diagnosis: CPA's Codex scanner supplies `event:` and
+  `data:` as separate chunks without newline delimiters. Concatenating these
+  chunks corrupted framing; healthy upstream responses became empty-stream
+  failures and were repeatedly retried. Restore delimiters for complete SSE
+  lines before buffering. This is not evidence of provider exhaustion or a
+  startup/signature crash. The corrected plugin returned `SMOKE_OK` through
+  real `gpt-5.6-sol` streaming calls on both the cloned CPA build and production
+  CPA 7.2.158 running separately on localhost:18317. Keep production isolated
+  from future testing; do not infer correctness from unit tests alone.
 - Provider-specific OAuth scoping is missing: CPA does not currently expose selected auth/provider metadata to plugin executors, so this plugin cannot distinguish Anthropic OAuth from other Anthropic credentials yet.
 - A request still fails with a CPA error such as `auth_unavailable: no auth available (providers=..., model=...; last upstream error: ...)`: that text is produced by CPA's built-in execution path, which means the plugin router did not claim the request. Confirm `plugins.configs.model-fallback-router.enabled` is true and that a rule's `models` pattern matches the client-requested model with a matching `source_formats` entry. The plugin logs routing and fallback decisions through the CPA host log, so enable debug logging and search for `model-fallback-router: claimed request` or `model-fallback-router: declined request`.
 
