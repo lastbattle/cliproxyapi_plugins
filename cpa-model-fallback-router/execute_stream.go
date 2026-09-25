@@ -187,13 +187,12 @@ func forwardHostModelStreamContext(ctx context.Context, exec pluginapi.ExecutorR
 				return responseStatus(0, errFailure), emitted, errFailure
 			}
 			if !ready {
-				if chunk.Done {
-					// A provider may send a complete non-SSE body. Do not drop it.
-					flush = gate.flush()
-				}
+				// Do not flush a buffered stream merely because it ended. The
+				// buffer may contain only SSE metadata or [DONE], which CPA would
+				// treat as an empty upstream response and return 502.
 				if len(flush) == 0 {
 					if chunk.Done {
-						return http.StatusOK, emitted, nil
+						return http.StatusBadGateway, emitted, statusError{status: http.StatusBadGateway, message: "upstream stream closed before first payload"}
 					}
 					continue
 				}
@@ -206,7 +205,7 @@ func forwardHostModelStreamContext(ctx context.Context, exec pluginapi.ExecutorR
 			}
 		}
 		if chunk.Done {
-			if !emitted {
+			if !emitted && streamPayloadReady(gate.buf.Bytes()) {
 				if flush := gate.flush(); len(flush) > 0 {
 					emitted = true
 					if errEmit := emitPluginStreamChunkFn(pluginStreamID, flush); errEmit != nil {

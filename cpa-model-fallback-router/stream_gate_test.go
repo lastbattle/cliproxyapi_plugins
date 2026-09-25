@@ -179,6 +179,20 @@ func TestRunExecutionFallbackStreamRetriesStreamedCapacityFailure(t *testing.T) 
 	}
 }
 
+func TestRunExecutionFallbackStreamRejectsMetadataOnlyCompletion(t *testing.T) {
+	configureFallbackTest(t, 60)
+	state := stubHostStream(t, map[string][]pluginapi.HostModelStreamReadResponse{
+		"gpt-5.4": {{Payload: []byte("data: {\"type\":\"response.created\"}\n\n"), Done: true}},
+	})
+	errRun := runExecutionFallbackStream(nil, testExecutorRequest(), "callback-metadata-only", "plugin-stream-metadata-only")
+	if errRun == nil || !strings.Contains(errRun.Error(), "upstream stream closed before first payload") {
+		t.Fatalf("error = %v, want empty-payload error", errRun)
+	}
+	if len(state.emitted) != 0 {
+		t.Fatalf("emitted chunks = %d, want none", len(state.emitted))
+	}
+}
+
 func TestStreamGatePreservesQuotedCapacityText(t *testing.T) {
 	g := &streamGate{}
 	payload := []byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"Selected model is at capacity. Please try a different model.\"}\n\n")
