@@ -101,7 +101,12 @@ func runExecutionFallbackStream(parent context.Context, exec pluginapi.ExecutorR
 		if errTransform != nil {
 			return errTransform
 		}
-		status, emitted, errForward := forwardHostModelStreamContext(ctx, exec, hostCallbackID, model, bodyInfo.EntryProtocol, bodyInfo.ResponseProtocol, body, pluginStreamID)
+		// Bound each native host call as well as the whole chain. This is
+		// essential during CPA shutdown: a provider stream that never returns
+		// must not hold the service drain open for the full retry budget.
+		attemptCtx, cancelAttempt := context.WithTimeout(ctx, 15*time.Second)
+		status, emitted, errForward := forwardHostModelStreamContext(attemptCtx, exec, hostCallbackID, model, bodyInfo.EntryProtocol, bodyInfo.ResponseProtocol, body, pluginStreamID)
+		cancelAttempt()
 		if errForward == nil && successStatus(responseStatus(status, nil)) {
 			logHostFn(hostCallbackID, "info", "model-fallback-router: stream attempt succeeded", map[string]any{
 				"rule":                  rule.Name,

@@ -96,9 +96,13 @@ func defaultPluginConfig() pluginConfig {
 	return pluginConfig{
 		Enabled: false,
 		Fallback: fallbackSettings{
-			RetryBaseMS:        500,
-			RetryMaxMS:         8000,
-			MaxElapsedSeconds:  600,
+			RetryBaseMS: 500,
+			RetryMaxMS:  8000,
+			// Keep a retry chain bounded.  A plugin executor has no reliable
+			// shutdown callback; a 10-attempt stream chain lasting ten minutes
+			// can prevent CPA's HTTP server from draining and make restart look
+			// like a startup failure.
+			MaxElapsedSeconds:  90,
 			Enabled:            true,
 			FallbackOnStatus:   append([]int(nil), defaultFallbackOnStatus...),
 			NoFallbackOnStatus: append([]int(nil), defaultNoFallbackOnStatus...),

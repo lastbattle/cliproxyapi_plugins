@@ -268,6 +268,11 @@ rg -i 'Code Signature Invalid|unavailable executor|upstream stream closed' \
 - Only the first fallback is tried: confirm that fallback's own failure is fallback eligible. Statuses `400`, `404`, and `422` stop the chain by default.
 - Disabled primary accounts still get called repeatedly: confirm `cooldown_seconds` is greater than `0`; after the first fallback-eligible auth failure, later requests skip the primary model until the cooldown expires.
 - Streaming requests stop after an upstream error: fallback is only possible before the first stream chunk is sent to the client.
+- Retry chains are bounded to 90 seconds by default, and each native host
+  stream attempt is bounded to 15 seconds. This prevents ten same-model
+  retries from keeping CPA's HTTP server alive past its shutdown deadline.
+  If you override `fallback.max_elapsed_seconds`, keep it short enough for
+  the service manager's stop timeout.
 - Provider-specific OAuth scoping is missing: CPA does not currently expose selected auth/provider metadata to plugin executors, so this plugin cannot distinguish Anthropic OAuth from other Anthropic credentials yet.
 - A request still fails with a CPA error such as `auth_unavailable: no auth available (providers=..., model=...; last upstream error: ...)`: that text is produced by CPA's built-in execution path, which means the plugin router did not claim the request. Confirm `plugins.configs.model-fallback-router.enabled` is true and that a rule's `models` pattern matches the client-requested model with a matching `source_formats` entry. The plugin logs routing and fallback decisions through the CPA host log, so enable debug logging and search for `model-fallback-router: claimed request` or `model-fallback-router: declined request`.
 
