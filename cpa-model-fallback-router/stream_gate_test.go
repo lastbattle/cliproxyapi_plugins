@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -230,6 +231,24 @@ func TestRunExecutionFallbackStreamStopsAfterFirstEmittedChunk(t *testing.T) {
 	}
 	if len(state.calls) != 1 || state.calls[0] != "claude-sonnet-4-5" {
 		t.Fatalf("host calls = %#v, want no retry once bytes reached the client", state.calls)
+	}
+}
+
+func TestRunExecutionFallbackStreamRetriesEmptyCompletion(t *testing.T) {
+	configureSameModelStreamRetryTest(t)
+	state := stubHostStream(t, map[string][]pluginapi.HostModelStreamReadResponse{
+		"gpt-5.6-sol": {
+			{Done: true},
+			{Payload: []byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"recovered\"}\n\n")},
+			{Done: true},
+		},
+	})
+	errRun := runExecutionFallbackStream(context.Background(), pluginapi.ExecutorRequest{Model: "gpt-5.6-sol", SourceFormat: "openai-response", OriginalRequest: []byte(`{"model":"gpt-5.6-sol","input":[]}`)}, "callback-1", "plugin-stream-1")
+	if errRun != nil {
+		t.Fatalf("runExecutionFallbackStream() error = %v", errRun)
+	}
+	if len(state.calls) != 2 || len(state.emitted) != 1 || !strings.Contains(string(state.emitted[0]), "recovered") {
+		t.Fatalf("calls=%#v emitted=%q, want retry then payload", state.calls, state.emitted)
 	}
 }
 

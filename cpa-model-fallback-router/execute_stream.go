@@ -209,6 +209,9 @@ func forwardHostModelStreamContext(ctx context.Context, exec pluginapi.ExecutorR
 					}
 				}
 			}
+			if !emitted {
+				return http.StatusBadGateway, false, statusError{status: http.StatusBadGateway, message: "upstream stream closed before first payload"}
+			}
 			return http.StatusOK, emitted, nil
 		}
 	}
