@@ -89,10 +89,12 @@ func runExecutionFallbackStream(parent context.Context, exec pluginapi.ExecutorR
 	})
 
 	var lastErr error
+	deadlineRecoveryUsed := false
+	var recoveryCtx context.Context
 	bodyInfo := requestBodyInfo(exec)
 	for index, model := range attempts {
 		delay := retryDelay(policy, index)
-		if err := waitRetry(ctx, delay); err != nil {
+		if err := waitRetry(ctx, delay); err != nil && !(deadlineRecoveryUsed && index > 0 && isNetworkError(lastErr)) {
 			logHostFn(hostCallbackID, "warn", "model-fallback-router: retry wait stopped", retryFields(hostCallbackID, index, len(attempts), started, err, false, false))
 			return err
 		}
@@ -101,7 +103,18 @@ func runExecutionFallbackStream(parent context.Context, exec pluginapi.ExecutorR
 		if errTransform != nil {
 			return errTransform
 		}
-		status, emitted, errForward := forwardHostModelStreamContext(ctx, exec, hostCallbackID, model, bodyInfo.EntryProtocol, bodyInfo.ResponseProtocol, body, pluginStreamID)
+		attemptCtx := ctx
+		if recoveryCtx != nil {
+			attemptCtx = recoveryCtx
+		} else if ctx.Err() != nil && !deadlineRecoveryUsed && index < len(attempts)-1 {
+			// CPA can surface an upstream context deadline as a terminal stream
+			// error at the same moment our chain budget expires. Give one
+			// no-content recovery attempt a short, independent budget.
+			recoveryCtx, _ = context.WithTimeout(context.Background(), 15*time.Second)
+			attemptCtx = recoveryCtx
+			deadlineRecoveryUsed = true
+		}
+		status, emitted, errForward := forwardHostModelStreamContext(attemptCtx, exec, hostCallbackID, model, bodyInfo.EntryProtocol, bodyInfo.ResponseProtocol, body, pluginStreamID)
 		if errForward == nil && successStatus(responseStatus(status, nil)) {
 			logHostFn(hostCallbackID, "info", "model-fallback-router: stream attempt succeeded", map[string]any{
 				"rule":                  rule.Name,
@@ -116,7 +129,7 @@ func runExecutionFallbackStream(parent context.Context, exec pluginapi.ExecutorR
 			errForward = statusError{status: status, message: fmt.Sprintf("host model %s stream returned status %d", model, status)}
 		}
 		lastErr = errForward
-		fallbackAllowed := ctx.Err() == nil && shouldFallback(responseStatus(status, errForward), errForward, policy)
+		fallbackAllowed := (ctx.Err() == nil || (deadlineRecoveryUsed && !emitted && isNetworkError(errForward))) && shouldFallback(responseStatus(status, errForward), errForward, policy)
 		if fallbackAllowed && strings.EqualFold(model, plan.Primary) {
 			primaryCooldowns.mark(cooldownKey, fallbackCooldownDuration(policy))
 		}
