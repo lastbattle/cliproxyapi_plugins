@@ -39,6 +39,15 @@ func logHost(hostCallbackID, level, message string, fields map[string]any) {
 	if strings.TrimSpace(message) == "" {
 		return
 	}
+	// CPA's text log can omit Fields: main.log on 2026-09-28 at 07:21:33
+	// recorded only "stream attempt failed, returning upstream error" for
+	// request 00000205, hiding client_emitted and stop_reason. Include the
+	// router's diagnostic fields in the message too; never include raw bodies.
+	if len(fields) > 0 {
+		if encoded, err := json.Marshal(fields); err == nil {
+			message += " " + string(encoded)
+		}
+	}
 	_, _ = callHost(pluginabi.MethodHostLog, hostLogRequest{
 		HostCallbackID: hostCallbackID,
 		Level:          level,

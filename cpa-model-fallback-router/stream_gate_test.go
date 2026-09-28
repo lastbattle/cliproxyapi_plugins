@@ -102,14 +102,19 @@ func TestStreamGatePassesThroughAfterCommit(t *testing.T) {
 
 // CPA's Codex executor yields scanner lines, not raw framed SSE bytes.
 // Preserve the retry window for failure lines and deliver successful content.
+// Error object captured in ~/.cli-proxy-api/logs/main.log on 2026-09-28
+// at 07:21:33 (request 00000205). The log records the error JSON, not SSE
+// framing; event/data lines below simulate the host scanner transport.
+// The displayed "Selected model is at capacity" wording is absent from that
+// log. Match the structured server_is_overloaded error, not assistant text.
 func TestHostScannerLinesRetryCapacityAndDeliverContent(t *testing.T) {
 	configureFallbackTest(t, 60)
 	state := stubHostStream(t, map[string][]pluginapi.HostModelStreamReadResponse{
 		"claude-sonnet-4-5": {
 			{Payload: []byte("event: response.created")},
 			{Payload: []byte(`data: {"type":"response.created"}`)},
-			{Payload: []byte("event: response.failed")},
-			{Payload: []byte(`data: {"type":"response.failed","response":{"error":{"message":"Selected model is at capacity. Please try a different model."}}}`)},
+			{Payload: []byte("event: error")},
+			{Payload: []byte(`data: {"error":{"type":"service_unavailable_error","code":"server_is_overloaded","headers":{"x-retry-metadata":"NO_MORE_RETRY"},"message":"Our servers are currently overloaded. Please try again later.","param":null},"sequence_number":3}`)},
 		},
 		"gpt-5.4": {
 			{Payload: []byte("event: response.output_text.delta")},
