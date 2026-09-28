@@ -33,6 +33,9 @@ func TestShouldFallbackStatusPolicy(t *testing.T) {
 	if !shouldFallback(0, errors.New("connection reset by peer"), settings) {
 		t.Fatal("shouldFallback(network error) = false, want true")
 	}
+	if !shouldFallback(http.StatusBadGateway, errors.New("context deadline exceeded"), settings) {
+		t.Fatal("shouldFallback(502, context deadline exceeded) = false, want true")
+	}
 	if !shouldFallback(0, errors.New("This request would exceed your account's rate limit. Please try again later."), settings) {
 		t.Fatal("shouldFallback(rate limit text) = false, want true")
 	}

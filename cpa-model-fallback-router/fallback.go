@@ -110,6 +110,8 @@ func isNetworkError(err error) bool {
 	}
 	message := strings.ToLower(err.Error())
 	for _, token := range []string{
+		// CPA may serialize context.DeadlineExceeded as plain text.
+		"context deadline exceeded",
 		"timeout",
 		"timed out",
 		"connection reset",
