@@ -49,11 +49,28 @@ func TestStreamDeadlineClosesBlockedRead(t *testing.T) {
 }
 
 func TestBackoffBoundsAndCancellation(t *testing.T) {
-	p := fallbackSettings{RetryBaseMS: 500, RetryMaxMS: 8000}
-	for index, want := range []time.Duration{0, 500 * time.Millisecond, time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 8 * time.Second} {
-		delay := retryDelay(p, index)
-		if delay < want/2 || delay > want {
-			t.Fatalf("attempt %d delay %v outside [%v,%v]", index, delay, want/2, want)
+	tests := []struct {
+		name  string
+		p     fallbackSettings
+		wants []time.Duration
+	}{
+		{
+			name:  "legacy sub-second schedule",
+			p:     fallbackSettings{RetryBaseMS: 500, RetryMaxMS: 8000},
+			wants: []time.Duration{0, 500 * time.Millisecond, time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 8 * time.Second},
+		},
+		{
+			name:  "ten second exponential schedule capped at 160 seconds",
+			p:     fallbackSettings{RetryBaseMS: 10000, RetryMaxMS: 160000},
+			wants: []time.Duration{0, 10 * time.Second, 20 * time.Second, 40 * time.Second, 80 * time.Second, 160 * time.Second, 160 * time.Second},
+		},
+	}
+	for _, test := range tests {
+		for index, want := range test.wants {
+			delay := retryDelay(test.p, index)
+			if delay < want/2 || delay > want {
+				t.Fatalf("%s attempt %d delay %v outside [%v,%v]", test.name, index, delay, want/2, want)
+			}
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())

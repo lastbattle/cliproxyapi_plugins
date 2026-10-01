@@ -96,13 +96,13 @@ func defaultPluginConfig() pluginConfig {
 	return pluginConfig{
 		Enabled: false,
 		Fallback: fallbackSettings{
-			RetryBaseMS: 500,
-			RetryMaxMS:  8000,
+			RetryBaseMS: 10000,
+			RetryMaxMS:  160000,
 			// Keep a retry chain bounded.  A plugin executor has no reliable
-			// shutdown callback; a 10-attempt stream chain lasting ten minutes
-			// can prevent CPA's HTTP server from draining and make restart look
+			// shutdown callback; a long stream chain can prevent CPA's server
+			// from draining and make restart look
 			// like a startup failure.
-			MaxElapsedSeconds:  90,
+			MaxElapsedSeconds:  1200,
 			Enabled:            true,
 			FallbackOnStatus:   append([]int(nil), defaultFallbackOnStatus...),
 			NoFallbackOnStatus: append([]int(nil), defaultNoFallbackOnStatus...),
@@ -171,8 +171,8 @@ func validateConfig(cfg pluginConfig) error {
 	if cfg.Fallback.CooldownSeconds < 0 {
 		return fmt.Errorf("fallback.cooldown_seconds must be >= 0")
 	}
-	if cfg.Fallback.RetryBaseMS < 0 || cfg.Fallback.RetryMaxMS < cfg.Fallback.RetryBaseMS || cfg.Fallback.RetryMaxMS > 60000 || cfg.Fallback.MaxElapsedSeconds < 1 || cfg.Fallback.MaxElapsedSeconds > 3600 {
-		return fmt.Errorf("fallback requires 0 <= retry_base_ms <= retry_max_ms <= 60000 and 1 <= max_elapsed_seconds <= 3600")
+	if cfg.Fallback.RetryBaseMS < 0 || cfg.Fallback.RetryMaxMS < cfg.Fallback.RetryBaseMS || cfg.Fallback.RetryMaxMS > 160000 || cfg.Fallback.MaxElapsedSeconds < 1 || cfg.Fallback.MaxElapsedSeconds > 3600 {
+		return fmt.Errorf("fallback requires 0 <= retry_base_ms <= retry_max_ms <= 160000 and 1 <= max_elapsed_seconds <= 3600")
 	}
 	if err := validateExecutionTransformSettings("execution_transform", cfg.ExecutionTransform); err != nil {
 		return err

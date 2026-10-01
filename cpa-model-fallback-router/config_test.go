@@ -100,6 +100,33 @@ fallback:
 	}
 }
 
+func TestDecodeConfigAccepts160SecondRetryCap(t *testing.T) {
+	raw := `enabled: true
+rules:
+  - name: long_retry
+    models:
+      - "claude-*"
+    fallback_models:
+      - gpt-5.4
+fallback:
+  retry_base_ms: 10000
+  retry_max_ms: 160000
+  max_elapsed_seconds: 1200
+`
+	cfg, err := decodeConfig([]byte(raw))
+	if err != nil {
+		t.Fatalf("decodeConfig() error = %v", err)
+	}
+	if cfg.Fallback.RetryBaseMS != 10000 || cfg.Fallback.RetryMaxMS != 160000 || cfg.Fallback.MaxElapsedSeconds != 1200 {
+		t.Fatalf("fallback timing = %+v, want 10s base, 160s cap, 1200s deadline", cfg.Fallback)
+	}
+
+	_, err = decodeConfig([]byte(strings.Replace(raw, "retry_max_ms: 160000", "retry_max_ms: 160001", 1)))
+	if err == nil || !strings.Contains(err.Error(), "160000") {
+		t.Fatalf("decodeConfig() error = %v, want retry cap error", err)
+	}
+}
+
 func TestDecodeConfigRuleCooldownOverrideAllowsZero(t *testing.T) {
 	cfg, err := decodeConfig([]byte(`enabled: true
 rules:

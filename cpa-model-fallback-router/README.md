@@ -103,8 +103,9 @@ Upstream `context deadline exceeded` errors are retryable, including when CPA
 passes only the error text without an HTTP status. HTTP 502 is fallback-eligible
 by default, subject to the configured terminal status list.
 
-Retry timing is configured under `fallback`: `retry_base_ms` (default 500),
-`retry_max_ms` (default 8000), and `max_elapsed_seconds` (default 90).
+Retry timing is configured under `fallback`: `retry_base_ms` (default 10000),
+`retry_max_ms` (default and maximum 160000), and `max_elapsed_seconds`
+(default 1200).
 Exponential delays use equal jitter (half to full delay) and apply between
 attempts, including repeated `$requested` entries. Ten repeated entries mean
 ten retries plus the initial attempt. The deadline includes generation time;
