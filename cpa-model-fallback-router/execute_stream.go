@@ -130,6 +130,7 @@ func runExecutionFallbackStream(parent context.Context, exec pluginapi.ExecutorR
 		}
 		lastErr = errForward
 		fallbackAllowed := (ctx.Err() == nil || (deadlineRecoveryUsed && !emitted && isNetworkError(errForward))) && shouldFallback(responseStatus(status, errForward), errForward, policy)
+		retryAfterEmission := isRetryableUpstreamError(errForward)
 		if fallbackAllowed && strings.EqualFold(model, plan.Primary) {
 			primaryCooldowns.mark(cooldownKey, fallbackCooldownDuration(policy))
 		}
@@ -149,7 +150,7 @@ func runExecutionFallbackStream(parent context.Context, exec pluginapi.ExecutorR
 		} else {
 			logHostFn(hostCallbackID, "warn", "model-fallback-router: stream attempt failed, returning upstream error", fields)
 		}
-		if emitted || index == len(attempts)-1 || !fallbackAllowed {
+		if (emitted && !retryAfterEmission) || index == len(attempts)-1 || !fallbackAllowed {
 			return errForward
 		}
 	}

@@ -64,7 +64,7 @@ func shouldFallback(status int, err error, settings fallbackSettings) bool {
 	// name, and for a status CPA did not preserve, consult the error text: CPA
 	// sometimes carries an unlisted code alongside an auth-unavailable, cooldown,
 	// overload, quota, or transport failure that another model can still serve.
-	return isNetworkError(err) || isRateLimitError(err) || isAuthUnavailableError(err) || isModelUnavailableError(err)
+	return isRetryableUpstreamError(err) || isNetworkError(err) || isRateLimitError(err) || isAuthUnavailableError(err) || isModelUnavailableError(err)
 }
 
 func statusInList(status int, list []int) bool {
@@ -123,6 +123,26 @@ func isNetworkError(err error) bool {
 		"temporary failure",
 		"network is unreachable",
 		"eof",
+	} {
+		if strings.Contains(message, token) {
+			return true
+		}
+	}
+	return false
+}
+
+// The Codex upstream sometimes returns this generic server error after a
+// stream has already started. It is transient despite carrying no useful HTTP
+// status, and the client surfaces it as "Stream disconnected before
+// completion" while it reconnects.
+func isRetryableUpstreamError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(strings.Join(strings.Fields(err.Error()), " "))
+	for _, token := range []string{
+		"an error occurred while processing your request",
+		"stream disconnected before completion",
 	} {
 		if strings.Contains(message, token) {
 			return true

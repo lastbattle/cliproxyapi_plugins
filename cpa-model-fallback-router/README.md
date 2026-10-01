@@ -135,7 +135,7 @@ routing is not repaired by repeating the same model.
 - `cooldown_seconds` defaults to `60`; set it to `0` globally or per rule to disable primary-model cooldown.
 - During cooldown, the plugin skips the primary model and sends the request directly to configured fallback models.
 - Non-streaming requests can fall back after a failed response.
-- Streaming requests fall back only if the failure happens before the first client-visible content event is emitted. Transport prelude events such as `response.created` are held back until real content arrives, so an overload reported after the stream opens can still be retried.
+- Streaming requests fall back when the failure happens before the first client-visible content event is emitted. Transport prelude events such as `response.created` are held back until real content arrives, so an overload reported after the stream opens can still be retried. The transient Codex server error `An error occurred while processing your request...` is also retried after emission because clients surface it as a reconnectable stream disconnect.
 - If CPA loses the numeric HTTP status, or preserves one that the configured status lists do not name, but the error text clearly indicates rate limiting, quota exhaustion, auth unavailability, model cooldown, model/provider unavailability, or an operator-disabled account, the plugin treats the failure as fallback eligible. Explicit `no_fallback_on_status` entries still win over matching text.
 - `execution_transform` is disabled by default. Configure it globally, then enable it narrowly per rule for the harness routes that should enforce action-or-audited-exit behavior.
 - `activation` controls when a matched rule becomes an execution turn. Use `tool_surface` for normal harness traffic: after source/model rule matching, transform only requests that expose tools, without matching prompt phrases. Use `always` only for tightly scoped rules where every matched request is intentionally an execution turn.
@@ -271,7 +271,7 @@ rg -i 'Code Signature Invalid|unavailable executor|upstream stream closed' \
 - The wrong fallback rule runs: rules are first-match-wins, so move the narrow rule above broader model patterns.
 - Only the first fallback is tried: confirm that fallback's own failure is fallback eligible. Statuses `400`, `404`, and `422` stop the chain by default.
 - Disabled primary accounts still get called repeatedly: confirm `cooldown_seconds` is greater than `0`; after the first fallback-eligible auth failure, later requests skip the primary model until the cooldown expires.
-- Streaming requests stop after an upstream error: fallback is only possible before the first stream chunk is sent to the client.
+- Streaming requests stop after an upstream error: fallback is normally only possible before the first stream chunk is sent to the client; the known reconnectable Codex server error is retried after emission.
 - Retry chains are bounded to 90 seconds by default, including generation time.
   There is no separate 15-second attempt timeout. A deadline alone does not
   guarantee clean shutdown of active native callbacks.

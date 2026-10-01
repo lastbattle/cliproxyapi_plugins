@@ -33,6 +33,9 @@ func TestShouldFallbackStatusPolicy(t *testing.T) {
 	if !shouldFallback(0, errors.New("connection reset by peer"), settings) {
 		t.Fatal("shouldFallback(network error) = false, want true")
 	}
+	if !shouldFallback(502, errors.New("An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists."), settings) {
+		t.Fatal("shouldFallback(upstream server error) = false, want true")
+	}
 	if !shouldFallback(http.StatusBadGateway, errors.New("context deadline exceeded"), settings) {
 		t.Fatal("shouldFallback(502, context deadline exceeded) = false, want true")
 	}

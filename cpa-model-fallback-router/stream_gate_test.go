@@ -134,6 +134,26 @@ func TestHostScannerLinesRetryCapacityAndDeliverContent(t *testing.T) {
 	}
 }
 
+func TestStreamRetriesTransientUpstreamErrorAfterEmission(t *testing.T) {
+	configureFallbackTest(t, 0)
+	state := stubHostStream(t, map[string][]pluginapi.HostModelStreamReadResponse{
+		"claude-sonnet-4-5": {
+			{Payload: []byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n")},
+			{Error: "An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists."},
+		},
+		"gpt-5.4": {
+			{Payload: []byte(`data: {"type":"response.output_text.delta","delta":"recovered"}`)},
+			{Done: true},
+		},
+	})
+	if err := runExecutionFallbackStream(nil, testExecutorRequest(), "upstream-error", "output"); err != nil {
+		t.Fatal(err)
+	}
+	if len(state.calls) != 2 {
+		t.Fatalf("calls=%v, want retry after transient upstream error", state.calls)
+	}
+}
+
 type stubbedHostStream struct {
 	calls   []string
 	emitted [][]byte
