@@ -13,6 +13,8 @@ go test ./...
 go build -buildmode=c-shared -o dist/model-fallback-router.so .
 ```
 
+Live CPA smoke tests should always use `gpt-6.1-sol` as the validation model.
+
 ```powershell
 .\scripts\build.ps1 -GOOS windows -GOARCH amd64
 ```

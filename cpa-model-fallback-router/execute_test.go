@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -91,6 +92,34 @@ func TestRunExecutionFallbackRetriesCapacityErrorBodyWithHTTP200(t *testing.T) {
 	}
 	if !reflect.DeepEqual(calls, []string{"claude-sonnet-4-5", "gpt-5.4"}) {
 		t.Fatalf("calls = %#v, want primary then fallback", calls)
+	}
+}
+
+func TestRunExecutionFallbackRecoversAfterRouterDeadline(t *testing.T) {
+	configureFallbackTest(t, 0)
+	cfg := loadedConfig()
+	cfg.Fallback.MaxElapsedSeconds = 1
+	cfg.Fallback.RetryBaseMS = 0
+	currentConfig.Store(cfg)
+	var calls []string
+	executeHostModelAttempt = func(_ pluginapi.ExecutorRequest, _ string, model, _, _ string, _ []byte) (pluginapi.HostModelExecutionResponse, error) {
+		calls = append(calls, model)
+		if len(calls) == 1 {
+			time.Sleep(2 * time.Second)
+			return pluginapi.HostModelExecutionResponse{}, context.DeadlineExceeded
+		}
+		return pluginapi.HostModelExecutionResponse{StatusCode: http.StatusOK, Body: []byte(`{"ok":true}`)}, nil
+	}
+
+	body, _, _, err := runExecutionFallback(testExecutorRequest(), "callback-deadline-recovery")
+	if err != nil {
+		t.Fatalf("runExecutionFallback() error = %v", err)
+	}
+	if string(body) != `{"ok":true}` {
+		t.Fatalf("body = %s, want recovered payload", body)
+	}
+	if len(calls) < 2 || calls[1] != "gpt-5.4" {
+		t.Fatalf("calls = %#v, want primary followed by fallback recovery", calls)
 	}
 }
 

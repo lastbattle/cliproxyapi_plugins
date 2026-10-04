@@ -281,7 +281,7 @@ rg -i 'Code Signature Invalid|unavailable executor|upstream stream closed' \
   failures and were repeatedly retried. Restore delimiters for complete SSE
   lines before buffering. This is not evidence of provider exhaustion or a
   startup/signature crash. The corrected plugin returned `SMOKE_OK` through
-  real `gpt-5.6-sol` streaming calls on both the cloned CPA build and production
+  real `gpt-6.1-sol` streaming calls on both the cloned CPA build and production
   CPA 7.2.158 running separately on localhost:18317. Keep production isolated
   from future testing; do not infer correctness from unit tests alone.
 - Provider-specific OAuth scoping is missing: CPA does not currently expose selected auth/provider metadata to plugin executors, so this plugin cannot distinguish Anthropic OAuth from other Anthropic credentials yet.

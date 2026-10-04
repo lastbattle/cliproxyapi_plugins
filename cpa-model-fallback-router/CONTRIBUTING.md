@@ -16,6 +16,9 @@ Run the main verification command before opening a PR:
 go test ./...
 ```
 
+When performing a live CPA plugin smoke test, always use `gpt-6.1-sol` as the
+validation model so results remain comparable across runs.
+
 For release packaging changes, also run at least one local package smoke:
 
 ```powershell

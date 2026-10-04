@@ -91,10 +91,26 @@ func runExecutionFallback(exec pluginapi.ExecutorRequest, hostCallbackID string)
 	})
 
 	var lastErr error
+	deadlineRecoveryUsed := false
+	var recoveryCtx context.Context
 	bodyInfo := requestBodyInfo(exec)
 	for index, model := range attempts {
 		delay := retryDelay(policy, index)
-		if err := waitRetry(ctx, delay); err != nil {
+		attemptCtx := ctx
+		usingRecovery := false
+		if recoveryCtx != nil {
+			attemptCtx = recoveryCtx
+			usingRecovery = true
+		} else if ctx.Err() != nil && !deadlineRecoveryUsed && index < len(attempts) && isNetworkError(lastErr) {
+			// A host execution can consume the whole chain budget before CPA
+			// returns its context deadline error. Preserve one short, independent
+			// retry window so a fallback model can still recover the request.
+			recoveryCtx, _ = context.WithTimeout(context.Background(), 15*time.Second)
+			attemptCtx = recoveryCtx
+			deadlineRecoveryUsed = true
+			delay = 0
+		}
+		if err := waitRetry(attemptCtx, delay); err != nil {
 			logHostFn(hostCallbackID, "warn", "model-fallback-router: retry wait stopped", retryFields(hostCallbackID, index, len(attempts), started, err, false, false))
 			return nil, nil, nil, err
 		}
@@ -103,7 +119,7 @@ func runExecutionFallback(exec pluginapi.ExecutorRequest, hostCallbackID string)
 		if errTransform != nil {
 			return nil, nil, transformMetadata, errTransform
 		}
-		resp, errExecute := awaitHost(ctx, func() (pluginapi.HostModelExecutionResponse, error) {
+		resp, errExecute := awaitHost(attemptCtx, func() (pluginapi.HostModelExecutionResponse, error) {
 			return executeHostModelAttempt(exec, hostCallbackID, model, bodyInfo.EntryProtocol, bodyInfo.ResponseProtocol, body)
 		}, nil)
 		status := responseStatus(resp.StatusCode, errExecute)
@@ -139,7 +155,8 @@ func runExecutionFallback(exec pluginapi.ExecutorRequest, hostCallbackID string)
 			errExecute = hostModelStatusError(model, status, resp.Body)
 		}
 		lastErr = errExecute
-		fallbackAllowed := ctx.Err() == nil && shouldFallback(status, errExecute, policy)
+		deadlineRetryAvailable := ctx.Err() != nil && !deadlineRecoveryUsed && index < len(attempts)-1 && isNetworkError(errExecute)
+		fallbackAllowed := (ctx.Err() == nil || deadlineRetryAvailable || usingRecovery) && shouldFallback(status, errExecute, policy)
 		if fallbackAllowed && strings.EqualFold(model, plan.Primary) {
 			primaryCooldowns.mark(cooldownKey, fallbackCooldownDuration(policy))
 		}
