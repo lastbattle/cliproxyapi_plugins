@@ -33,6 +33,15 @@ func TestShouldFallbackStatusPolicy(t *testing.T) {
 	if !shouldFallback(0, errors.New("connection reset by peer"), settings) {
 		t.Fatal("shouldFallback(network error) = false, want true")
 	}
+	for _, message := range []string{
+		`Post "http://192.168.0.8:8888/v1/chat/completions": dial tcp 192.168.0.8:8888: no route to host`,
+		`Post "http://192.168.0.8:8888/v1/chat/completions": dial tcp 192.168.0.8:8888: connect: host is down`,
+		`Post "http://192.168.0.8:8888/v1/chat/completions": dial tcp 192.168.0.8:8888: operation timed out`,
+	} {
+		if !shouldFallback(0, errors.New(message), settings) {
+			t.Fatalf("shouldFallback(%q) = false, want true", message)
+		}
+	}
 	if !shouldFallback(502, errors.New("An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists."), settings) {
 		t.Fatal("shouldFallback(upstream server error) = false, want true")
 	}
