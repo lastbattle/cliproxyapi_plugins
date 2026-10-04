@@ -54,6 +54,13 @@ func shouldFallback(status int, err error, settings fallbackSettings) bool {
 	if (status == 0 || status == http.StatusBadRequest) && isContextWindowError(err) {
 		return true
 	}
+	// Codex can reject a request with a cyber-policy safety response while CPA
+	// preserves the upstream HTTP 400. This is model/account scoped: a
+	// configured fallback may still be able to serve the request, so keep the
+	// response on the retry path just like the context-window exception above.
+	if (status == 0 || status == http.StatusBadRequest) && isCyberPolicyError(err) {
+		return true
+	}
 	if statusInList(status, settings.NoFallbackOnStatus) {
 		return false
 	}
@@ -143,6 +150,26 @@ func isRetryableUpstreamError(err error) bool {
 	for _, token := range []string{
 		"an error occurred while processing your request",
 		"stream disconnected before completion",
+	} {
+		if strings.Contains(message, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func isCyberPolicyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(strings.Join(strings.Fields(err.Error()), " "))
+	for _, token := range []string{
+		"cyber_policy",
+		"cyber policy",
+		"cybersecurity risk",
+		"high-risk cyber activity",
+		"potentially high-risk cyber activity",
+		"possible cybersecurity risk",
 	} {
 		if strings.Contains(message, token) {
 			return true

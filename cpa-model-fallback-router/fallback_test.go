@@ -63,6 +63,45 @@ func TestShouldFallbackStatusPolicy(t *testing.T) {
 	}
 }
 
+func TestShouldFallbackCyberPolicy400(t *testing.T) {
+	settings := fallbackSettings{
+		Enabled:            true,
+		FallbackOnStatus:   defaultFallbackOnStatus,
+		NoFallbackOnStatus: defaultNoFallbackOnStatus,
+	}
+	cases := []struct {
+		name    string
+		status  int
+		message string
+	}{
+		{
+			name:    "structured code",
+			status:  http.StatusBadRequest,
+			message: `response.failed: {"error":{"code":"cyber_policy","message":"This request has been flagged for possible cybersecurity risk."}}`,
+		},
+		{
+			name:    "human readable message",
+			status:  http.StatusBadRequest,
+			message: "This request was flagged for potentially high-risk cyber activity.",
+		},
+		{
+			name:    "statusless upstream error",
+			status:  0,
+			message: "cyber policy: This request has been flagged for possible cybersecurity risk.",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if !shouldFallback(tc.status, errors.New(tc.message), settings) {
+				t.Fatalf("shouldFallback(%d, %q) = false, want true", tc.status, tc.message)
+			}
+		})
+	}
+	if shouldFallback(http.StatusBadRequest, errors.New("invalid request: missing required field"), settings) {
+		t.Fatal("shouldFallback(generic 400) = true, want false")
+	}
+}
+
 func TestStatusFromError(t *testing.T) {
 	if got := statusFromError(statusError{status: 503}); got != 503 {
 		t.Fatalf("statusFromError(statusError) = %d, want 503", got)
