@@ -250,6 +250,7 @@ func isModelUnavailableError(err error) bool {
 		"model unavailable",
 		"server_is_overloaded",
 		"model_at_capacity",
+		"model_is_at_capacity",
 		"selected model is at capacity",
 		"model is at capacity",
 		"at capacity. please try a different model",

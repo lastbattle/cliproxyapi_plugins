@@ -148,3 +148,23 @@ func TestShouldFallbackRecognizesCodexAuthUnavailableOnUnlistedStatus(t *testing
 		t.Fatal("shouldFallback(501, generic text) = true, want false")
 	}
 }
+
+func TestShouldFallbackRecognizesModelCapacityVariants(t *testing.T) {
+	settings := fallbackSettings{
+		Enabled:          true,
+		FallbackOnStatus: defaultFallbackOnStatus,
+	}
+	cases := []string{
+		"Selected model is at capacity. Please try a different model.",
+		`model_at_capacity: Selected model is at capacity.`,
+		`model_is_at_capacity: Selected model is at capacity.`,
+	}
+	for _, message := range cases {
+		if !shouldFallback(http.StatusServiceUnavailable, errors.New(message), settings) {
+			t.Fatalf("shouldFallback(503, %q) = false, want true", message)
+		}
+		if !shouldFallback(0, errors.New(message), settings) {
+			t.Fatalf("shouldFallback(0, %q) = false, want true", message)
+		}
+	}
+}

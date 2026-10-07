@@ -113,7 +113,7 @@ func retryFields(callback string, index, total int, started time.Time, err error
 	}
 	code := "unknown"
 	if err != nil {
-		for _, known := range []string{"server_is_overloaded", "model_at_capacity", "auth_unavailable", "model_not_found", "context_length_exceeded", "rate_limit_exceeded"} {
+		for _, known := range []string{"server_is_overloaded", "model_at_capacity", "model_is_at_capacity", "auth_unavailable", "model_not_found", "context_length_exceeded", "rate_limit_exceeded"} {
 			if strings.Contains(strings.ToLower(err.Error()), known) {
 				code = known
 				break
