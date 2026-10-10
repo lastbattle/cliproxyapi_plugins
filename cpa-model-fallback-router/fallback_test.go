@@ -66,6 +66,12 @@ func TestShouldFallbackStatusPolicy(t *testing.T) {
 	if !shouldFallback(0, errors.New("host_call_failed: unknown provider for model claude-haiku-4-5-20251001"), settings) {
 		t.Fatal("shouldFallback(unknown provider text) = false, want true")
 	}
+	if !shouldFallback(http.StatusBadRequest, errors.New(`unknown provider for model openai/gpt-6-sol`), settings) {
+		t.Fatal("shouldFallback(400, unknown provider) = false, want true")
+	}
+	if !shouldFallback(http.StatusBadRequest, errors.New(`model_not_found: unknown model`), settings) {
+		t.Fatal("shouldFallback(400, model_not_found) = false, want true")
+	}
 	settings.Enabled = false
 	if shouldFallback(429, nil, settings) {
 		t.Fatal("disabled shouldFallback(429) = true, want false")

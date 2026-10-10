@@ -61,6 +61,12 @@ func shouldFallback(status int, err error, settings fallbackSettings) bool {
 	if (status == 0 || status == http.StatusBadRequest) && isCyberPolicyError(err) {
 		return true
 	}
+	// A bad primary model id is request-scoped, not fatal for the chain: CPA
+	// returns it as HTTP 400/model_not_found, while a configured fallback may
+	// name a provider that can serve the same request.
+	if (status == 0 || status == http.StatusBadRequest) && isModelRoutingError(err) {
+		return true
+	}
 	if statusInList(status, settings.NoFallbackOnStatus) {
 		return false
 	}
@@ -258,6 +264,23 @@ func isModelUnavailableError(err error) bool {
 		"currently overloaded",
 		"server is overloaded",
 		"model is overloaded",
+	} {
+		if strings.Contains(message, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func isModelRoutingError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	for _, token := range []string{
+		"unknown provider for model",
+		"no provider for model",
+		"model_not_found",
 	} {
 		if strings.Contains(message, token) {
 			return true
