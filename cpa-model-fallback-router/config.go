@@ -9,7 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var defaultFallbackOnStatus = []int{401, 403, 408, 409, 429, 500, 502, 503, 504}
+var defaultFallbackOnStatus = []int{401, 403, 408, 429, 500, 502, 503, 504, 507}
 var defaultNoFallbackOnStatus = []int{400, 404, 422}
 
 const defaultFallbackCooldownSeconds = 60

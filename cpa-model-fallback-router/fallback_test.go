@@ -174,3 +174,15 @@ func TestShouldFallbackRecognizesModelCapacityVariants(t *testing.T) {
 		}
 	}
 }
+
+func TestShouldFallbackRetriesCPABufferLimit(t *testing.T) {
+	settings := fallbackSettings{
+		Enabled:            true,
+		FallbackOnStatus:   append([]int(nil), defaultFallbackOnStatus...),
+		NoFallbackOnStatus: append([]int(nil), defaultNoFallbackOnStatus...),
+	}
+	err := errors.New("exceeded request buffer limit while retrying upstream")
+	if !shouldFallback(http.StatusInsufficientStorage, err, settings) {
+		t.Fatal("shouldFallback(507, request buffer limit) = false, want true")
+	}
+}

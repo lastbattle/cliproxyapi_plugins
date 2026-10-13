@@ -96,6 +96,7 @@ plugins:
           - 502
           - 503
           - 504
+          - 507
         no_fallback_on_status:
           - 400
           - 404
@@ -163,7 +164,7 @@ The router does not depend on one provider JSON schema. It classifies the error 
 
 | Error family | Recognized status or text | Handling |
 | --- | --- | --- |
-| HTTP fallback statuses | `401`, `403`, `408`, `409`, `429`, `500`, `502`, `503`, `504` | Retry/fallback by default. The lists can be replaced globally or per rule. |
+| HTTP fallback statuses | `401`, `403`, `408`, `409`, `429`, `500`, `502`, `503`, `504`, `507` | Retry/fallback by default. The lists can be replaced globally or per rule. |
 | Rate limit and quota | `rate limit`, `ratelimit`, `too many requests`, `quota`, `exceed your account` | Retry even when CPA does not preserve a matching numeric status. |
 | ChatGPT transient server failure | `An error occurred while processing your request` | Retry, including after a stream has emitted content when the client reports a reconnectable disconnect. |
 | Stream disconnect | `stream disconnected before completion` | Retry as a transient upstream failure. |
