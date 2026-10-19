@@ -130,7 +130,8 @@ func runExecutionFallbackStream(parent context.Context, exec pluginapi.ExecutorR
 		}
 		lastErr = errForward
 		fallbackAllowed := (ctx.Err() == nil || (deadlineRecoveryUsed && !emitted && isNetworkError(errForward))) && shouldFallback(responseStatus(status, errForward), errForward, policy)
-		retryAfterEmission := isRetryableUpstreamError(errForward)
+		retryAfterEmission := isRetryableUpstreamError(errForward) || isCapacityOverloadError(errForward)
+		willRetry := fallbackAllowed && (!emitted || retryAfterEmission) && index < len(attempts)-1
 		if fallbackAllowed && strings.EqualFold(model, plan.Primary) {
 			primaryCooldowns.mark(cooldownKey, fallbackCooldownDuration(policy))
 		}
@@ -144,13 +145,14 @@ func runExecutionFallbackStream(parent context.Context, exec pluginapi.ExecutorR
 		}
 		mergeMetadata(fields, retryFields(hostCallbackID, index, len(attempts), started, errForward, fallbackAllowed, emitted))
 		fields["delay_before_attempt_ms"] = delay.Milliseconds()
-		if fallbackAllowed && !emitted && index < len(attempts)-1 {
+		if willRetry {
+			fields["stop_reason"] = "retry"
 			fields["next_model"] = attempts[index+1]
 			logHostFn(hostCallbackID, "info", "model-fallback-router: stream attempt failed, falling back", fields)
 		} else {
 			logHostFn(hostCallbackID, "warn", "model-fallback-router: stream attempt failed, returning upstream error", fields)
 		}
-		if (emitted && !retryAfterEmission) || index == len(attempts)-1 || !fallbackAllowed {
+		if !willRetry {
 			return errForward
 		}
 	}

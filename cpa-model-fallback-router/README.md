@@ -146,7 +146,7 @@ routing is not repaired by repeating the same model.
 - `cooldown_seconds` defaults to `60`; set it to `0` globally or per rule to disable primary-model cooldown.
 - Cooldown is held in memory and scoped by source format, rule name, and primary model; it resets on reconfiguration or shutdown. During cooldown, the plugin skips the primary model and any matching primary entries in the fallback list when a distinct fallback exists. Same-model-only chains remain usable during cooldown.
 - Non-streaming requests can fall back after a failed response.
-- Streaming requests fall back when the failure happens before the first client-visible content event is emitted. Transport prelude events such as `response.created` are held back until real content arrives, so an overload reported after the stream opens can still be retried. The transient Codex server error `An error occurred while processing your request...` is also retried after emission because clients surface it as a reconnectable stream disconnect.
+- Streaming requests fall back when the failure happens before the first client-visible content event is emitted. Transport prelude events such as `response.created` are held back until real content arrives, so an overload reported after the stream opens can still be retried. Recognized capacity/overload failures and the transient Codex server error `An error occurred while processing your request...` are also retried after emission, within the configured attempt and time limits. This can repeat partial output or tool calls already delivered by an earlier attempt.
 - If CPA loses the numeric HTTP status, or preserves one that the configured status lists do not name, but the error text clearly indicates rate limiting, quota exhaustion, auth unavailability, model cooldown, model/provider unavailability, or an operator-disabled account, the plugin treats the failure as fallback eligible. Recognized context-window and cyber-policy `400` responses are also eligible; other explicit `no_fallback_on_status` entries still win over matching text.
 - `execution_transform` is disabled by default. Configure it globally, then enable it narrowly per rule for the harness routes that should enforce action-or-audited-exit behavior. Settings are layered as defaults, global values, then rule values. `activation: tool_surface` requires tools in the request; `activation: always` removes the tool-surface activation check; protocol/model filters, post-tool bypass, and the `force_tools` policy still apply.
 - `force_tools` accepts `never`, `when_available` (the default), or `always_if_supported`. The transform can inject an operator-editable `execution_envelope`, add a named audited exit tool, require tool choice, and cap the envelope with `max_envelope_chars` (256–8000, or `0` for no cap).
@@ -203,7 +203,7 @@ example allows four attempts in total and disables primary cooldown:
 ```yaml
 rules:
   - name: gpt_capacity_retry
-    models: ["gpt-*"]
+    models: ["gpt-*", "codex-auto-review"]
     primary_model: "$requested"
     fallback_models: ["$requested", "$requested", "$requested"]
     cooldown_seconds: 0

@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- Retry recognized capacity/overload stream errors after emission within the existing attempt/time bounds, and log those retries accurately.
+
 - Detect model-overload failures that arrive inside a stream after HTTP 200, including `response.failed`/`error` SSE records, structured JSON error bodies, and capacity/overload message text, and retry before any client-visible content is emitted.
 - Preserve explicit repeats in `fallback_models` so a rule can request same-model retries; previously an identical resolved model name was collapsed and the rule produced a single attempt.
 - Honor auth-unavailable, cooldown, overload, quota, rate-limit, and transport error text when CPA preserves a numeric status the operator did not enumerate, so a fallback-eligible failure shape still advances the chain instead of returning a terminal error.

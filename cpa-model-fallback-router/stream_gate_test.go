@@ -135,22 +135,30 @@ func TestHostScannerLinesRetryCapacityAndDeliverContent(t *testing.T) {
 }
 
 func TestStreamRetriesTransientUpstreamErrorAfterEmission(t *testing.T) {
-	configureFallbackTest(t, 0)
-	state := stubHostStream(t, map[string][]pluginapi.HostModelStreamReadResponse{
-		"claude-sonnet-4-5": {
-			{Payload: []byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n")},
-			{Error: "An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists."},
-		},
-		"gpt-5.4": {
-			{Payload: []byte(`data: {"type":"response.output_text.delta","delta":"recovered"}`)},
-			{Done: true},
-		},
-	})
-	if err := runExecutionFallbackStream(nil, testExecutorRequest(), "upstream-error", "output"); err != nil {
-		t.Fatal(err)
-	}
-	if len(state.calls) != 2 {
-		t.Fatalf("calls=%v, want retry after transient upstream error", state.calls)
+	for _, failure := range []string{
+		"An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists.",
+		`{"error":{"message":"Our servers are currently overloaded. Please try again later.","type":"service_unavailable_error","code":"server_is_overloaded"},"sequence_number":3}`,
+		"Selected model is at capacity. Please try a different model.",
+	} {
+		t.Run(failure, func(t *testing.T) {
+			configureFallbackTest(t, 0)
+			state := stubHostStream(t, map[string][]pluginapi.HostModelStreamReadResponse{
+				"claude-sonnet-4-5": {
+					{Payload: []byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n")},
+					{Error: failure},
+				},
+				"gpt-5.4": {
+					{Payload: []byte(`data: {"type":"response.output_text.delta","delta":"recovered"}`)},
+					{Done: true},
+				},
+			})
+			if err := runExecutionFallbackStream(nil, testExecutorRequest(), "upstream-error", "output"); err != nil {
+				t.Fatal(err)
+			}
+			if len(state.calls) != 2 || len(state.emitted) != 2 || !strings.Contains(string(state.emitted[1]), "recovered") {
+				t.Fatalf("calls=%v emitted=%q, want recovery after transient upstream error", state.calls, state.emitted)
+			}
+		})
 	}
 }
 

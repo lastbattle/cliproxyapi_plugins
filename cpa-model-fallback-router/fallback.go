@@ -254,6 +254,22 @@ func isModelUnavailableError(err error) bool {
 		"no provider for model",
 		"provider unavailable",
 		"model unavailable",
+	} {
+		if strings.Contains(message, token) {
+			return true
+		}
+	}
+	return isCapacityOverloadError(err)
+}
+
+// Keep overload recognition separate from routing failures: only transient
+// capacity errors may use the stream retry exception after content is emitted.
+func isCapacityOverloadError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(strings.Join(strings.Fields(err.Error()), " "))
+	for _, token := range []string{
 		"server_is_overloaded",
 		"model_at_capacity",
 		"model_is_at_capacity",
