@@ -137,11 +137,16 @@ func TestHostScannerLinesRetryCapacityAndDeliverContent(t *testing.T) {
 func TestStreamRetriesTransientUpstreamErrorAfterEmission(t *testing.T) {
 	for _, failure := range []string{
 		"An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists.",
+		`Stream disconnected before completion: {"response":{"access_programs":{"cyber":"standard"},"background":false,"error":null,"status":"incomplete"}}`,
 		`{"error":{"message":"Our servers are currently overloaded. Please try again later.","type":"service_unavailable_error","code":"server_is_overloaded"},"sequence_number":3}`,
+		`auth_unavailable: no auth available (providers=codex, model=gpt-6.1-sol; last upstream error: server_is_overloaded: Our servers are currently overloaded. Please try again later.)`,
 		"Selected model is at capacity. Please try a different model.",
 	} {
 		t.Run(failure, func(t *testing.T) {
-			configureFallbackTest(t, 0)
+			cfg := configureFallbackTest(t, 0)
+			cfg.Fallback.RetryBaseMS = 0
+			cfg.Fallback.RetryMaxMS = 0
+			currentConfig.Store(cfg)
 			state := stubHostStream(t, map[string][]pluginapi.HostModelStreamReadResponse{
 				"claude-sonnet-4-5": {
 					{Payload: []byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n")},
