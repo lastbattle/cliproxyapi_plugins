@@ -8,11 +8,11 @@ Comparison baseline: Mia `main` commit [`3fd60dfc836fab0f1ed0fd4f0afaf2a1d62b2aa
 
 | Setting or behavior | Stock recipe at this revision | Deployed profile / overlay |
 | --- | --- | --- |
-| Active concurrency | 4 with DFlash2, TP=2 | 4 |
+| Active concurrency | 4 with DFlash2, TP=2 | 4 with DFlash2, TP=2 |
 | Per-request prompt + reply window | 1,048,576 tokens with FP8 KV; startup can reduce it to fit | 786,432 tokens |
 | Default reply limit | 32,768 tokens | 32,768 tokens |
 | Host memory reserve | 14.5 GiB at 4 streams / 32-row verify window | 23 GiB |
-| Extra shared pool budget, `KV_POOL_GIB` | Up to 12.5 GiB per rank, subject to startup memory | Up to 4 GiB per rank |
+| Extra shared pool budget, `KV_POOL_GIB` | Up to 12.5 GiB per rank, subject to startup memory | Up to 6 GiB per rank |
 | Waiting requests, `MAX_QUEUED` | Unset: unbounded queue | 6 waiting, beyond 4 active; further arrivals receive 429 + Retry-After |
 | Kept-state byte cap | Disabled (`TF_GLM_KEPT_BYTES_GIB=0`) | 2 GiB |
 | Own turn-boundary states per chat | Unlimited (`TF_GLM_KEEP_PER_CHAT=0`) | 2; shared states are accounted separately |
