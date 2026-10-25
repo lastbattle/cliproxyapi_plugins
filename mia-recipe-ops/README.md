@@ -31,6 +31,8 @@ This profile is an observed operating point, **not a guarantee that four full-si
 
 `KV_POOL_GIB` is a budget cap, not a dedicated block guaranteed to reach that size. The host reserve reduces the memory budget available at startup; it is not a separate allocation or hard runtime RAM limit. Runtime work can consume part of the reserve. These machines use unified CPU/GPU memory, so queue RAM competes with the model too.
 
+For the current model and cache settings, token-dependent storage costs about 6,748 bytes per row, so each additional GiB of pool holds roughly 159,120 rows once fixed-state reservations are met. `KV_POOL_GIB` is budget beyond the baseline context allocation and partly holds fixed states, so its cap does not translate into a direct multiple of that figure.
+
 Waiting requests retain their request body, token lists, connection and server/proxy bookkeeping. They generally do not get an active lane's GPU KV cache until admission, but prompt parsing/tokenization and optional stored-state reads can happen earlier. Six waiting requests smooth bursts; they do not increase throughput. Many large prompts can still use material RAM, and long queues can exceed client/proxy timeouts.
 
 Idle kept prompts can occupy pool rows. They are reusable cache and can be evicted for new work; an almost-full pool alone is not proof of an OOM or a deadlock. Even with these safeguards, a stall can recur; automatic recovery reduces its duration, not its underlying probability to zero.
