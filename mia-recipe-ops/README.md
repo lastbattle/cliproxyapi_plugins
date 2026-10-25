@@ -11,8 +11,8 @@ Comparison baseline: Mia `main` commit [`3fd60dfc836fab0f1ed0fd4f0afaf2a1d62b2aa
 | Active concurrency | 4 with DFlash2, TP=2 | 4 with DFlash2, TP=2 |
 | Per-request prompt + reply window | 1,048,576 tokens with FP8 KV; startup can reduce it to fit | 786,432 tokens |
 | Default reply limit | 32,768 tokens | 32,768 tokens |
-| Host memory reserve | 14.5 GiB at 4 streams / 32-row verify window | 23 GiB |
-| Extra shared pool budget, `KV_POOL_GIB` | Up to 12.5 GiB per rank, subject to startup memory | Up to 6 GiB per rank |
+| Host memory reserve | 14.5 GiB at 4 streams / 32-row verify window | 21 GiB |
+| Extra shared pool budget, `KV_POOL_GIB` | Up to 12.5 GiB per rank, subject to startup memory | Up to 8 GiB per rank |
 | Waiting requests, `MAX_QUEUED` | Unset: unbounded queue | 6 waiting, beyond 4 active; further arrivals receive 429 + Retry-After |
 | Kept-state byte cap | Disabled (`TF_GLM_KEPT_BYTES_GIB=0`) | 2 GiB |
 | Own turn-boundary states per chat | Unlimited (`TF_GLM_KEEP_PER_CHAT=0`) | 2; shared states are accounted separately |
@@ -27,7 +27,7 @@ Comparison baseline: Mia `main` commit [`3fd60dfc836fab0f1ed0fd4f0afaf2a1d62b2aa
 
 ### Memory and queue limits
 
-This profile is an observed operating point, **not a guarantee that four full-size contexts fit simultaneously**. The shared pool was 925,696 token rows after the latest restart; four full windows would require 3,145,728 rows before considering sharing or eviction. Pool size varies with startup memory and kept-state reservations. The scheduler may wait for memory even with an execution lane free.
+This profile is an observed operating point, **not a guarantee that four full-size contexts fit simultaneously**. The shared pool was 1,150,976 token rows after the latest restart; four full windows would require 3,145,728 rows before considering sharing or eviction. Pool size varies with startup memory and kept-state reservations. The scheduler may wait for memory even with an execution lane free.
 
 `KV_POOL_GIB` is a budget cap, not a dedicated block guaranteed to reach that size. The host reserve reduces the memory budget available at startup; it is not a separate allocation or hard runtime RAM limit. Runtime work can consume part of the reserve. These machines use unified CPU/GPU memory, so queue RAM competes with the model too.
 
