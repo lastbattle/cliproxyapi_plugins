@@ -44,6 +44,11 @@ Idle kept prompts can occupy pool rows. They are reusable cache and can be evict
 - [`supervise.sh`](supervise.sh): runs the recipe's coordinated `start.sh restart`, then the watchdog.
 - [`render-service.py`](render-service.py): stages a systemd service and runtime files without modifying or restarting a deployment.
 - [`verify-cancellation.py`](verify-cancellation.py): opt-in live check through CLIProxyAPI for plain chat, streaming chat and streaming Responses requests.
+- [`clock-limits.md`](clock-limits.md): CPU/GPU clock caps deployed on both DGX Sparks, boot persistence, verification and rollback.
+
+### CPU and GPU clock limits
+
+Both nodes use a **2,808 MHz CPU maximum on all 20 cores** and a **2,200 MHz GPU graphics-clock maximum**, applied live and persisted with systemd. These are host settings, separate from `scripts/local.sh`; GLM did not need a restart. See [clock-limits.md](clock-limits.md) for the configuration and verification details. Lower clocks can reduce heat, but this deployment has not measured their throughput or temperature benefit under comparable loads.
 
 ## Install on the head node
 
