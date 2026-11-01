@@ -1,6 +1,6 @@
 # Wi-Fi recovery on two DGX Sparks
 
-Configured on **both head and worker on 2026-11-01 UTC**. This is a host NetworkManager/systemd configuration, separate from the Mia recipe and inference watchdog.
+Configure NetworkManager and a systemd reconnect timer on each node, separately from the Mia recipe and inference watchdog.
 
 ## Reconnect behavior
 
@@ -16,7 +16,7 @@ The check detects a **disconnected Wi-Fi device**, not broken Internet access or
 
 ## Install or adapt on each node
 
-Use a saved, working Wi-Fi profile; no passwords belong in the script or this repository. The deployed interface is `wlP9s9` and the profile is `frontier`. Verify your own values first:
+Use a saved, working Wi-Fi profile; no passwords belong in the script or this repository. The examples use interface `wlP9s9` and profile `frontier`; substitute your own values throughout. Inspect them first:
 
 ```bash
 nmcli device status
@@ -105,16 +105,11 @@ journalctl -u glm-wifi-reconnect.service -b --no-pager
 journalctl -u NetworkManager --since '1 hour ago' --no-pager
 ```
 
-After deployment, both profiles reported retries `0 (forever)`, both timers were active, and both devices remained connected. The service's connected-device no-op returned success on each host; GLM remained healthy with an active decoding request. We did **not** deliberately disconnect either host or reboot to test recovery. Timer enablement provides boot persistence, but a forced-outage recovery test remains unperformed.
+Expected results: retries `0 (forever)`, an enabled and active timer, and a successful no-op when the device is already connected. Check these again after reboot.
 
 If the head loses LAN access while the worker remains reachable, SSH through the worker to the head's ConnectX-7 address and reactivate the saved profile. This requires suitable SSH authentication on both hops.
 
 ## Backup and rollback
-
-Original profile settings were recorded privately in `profile-settings.json` on each host:
-
-- Head: `/home/random/.cache/tensorfold-glm53/config-backups/20261101-223905-wifi-reconnect/`
-- Worker: `/home/random/.cache/tensorfold-glm53/config-backups/20261101-223909-wifi-reconnect/`
 
 To stop the additional recovery check:
 
@@ -122,4 +117,4 @@ To stop the additional recovery check:
 sudo systemctl disable --now glm-wifi-reconnect.timer
 ```
 
-Restore that host's saved `connection.autoconnect` and `connection.autoconnect-retries` values with `nmcli connection modify`. The deployment had no preexisting reconnect script/service/timer; the new disabled files may be retained for reference. If removing them, run `sudo systemctl daemon-reload` afterward. Neither disabling the timer nor restoring these profile settings requires restarting GLM or disconnecting Wi-Fi.
+Restore that host's saved `connection.autoconnect` and `connection.autoconnect-retries` values with `nmcli connection modify`. Restore any script/service/timer files you backed up during installation, or retain the disabled files for reference. If removing them, run `sudo systemctl daemon-reload` afterward. Neither disabling the timer nor restoring these profile settings requires restarting GLM or disconnecting Wi-Fi.
