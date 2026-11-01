@@ -45,6 +45,11 @@ Idle kept prompts can occupy pool rows. They are reusable cache and can be evict
 - [`render-service.py`](render-service.py): stages a systemd service and runtime files without modifying or restarting a deployment.
 - [`verify-cancellation.py`](verify-cancellation.py): opt-in live check through CLIProxyAPI for plain chat, streaming chat and streaming Responses requests.
 - [`clock-limits.md`](clock-limits.md): CPU/GPU clock caps deployed on both DGX Sparks, boot persistence, verification and rollback.
+- [`wifi-recovery.md`](wifi-recovery.md): unlimited Wi-Fi retries and a saved-profile reconnect timer on both nodes, with installation, verification and rollback.
+
+### Wi-Fi recovery
+
+Both nodes have unlimited NetworkManager autoconnect retries and a systemd timer that checks approximately every minute. When Wi-Fi is disconnected, it explicitly reactivates the saved `frontier` profile. It leaves active connections, ongoing activation and a disabled radio alone. See [wifi-recovery.md](wifi-recovery.md). This restores host connectivity without restarting the model; recovery still requires a reachable access point.
 
 ### CPU and GPU clock limits
 
